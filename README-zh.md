@@ -8,6 +8,13 @@
 
 **无需 API Key。无需联网。100% 隐私安全。**
 
+## 演示
+
+
+https://github.com/user-attachments/assets/63cae308-71da-452e-8c8a-0f5a54464e74
+
+
+
 ## 📸 界面预览
 
 ![GUI](Screenshots/GUI.png)
@@ -55,6 +62,33 @@
 
 > **📝 提示**：`translategemma` 模型实际支持多达 **55 种语言**。如果列表里没有你需要的语言，可以直接修改源代码中的 `self.languages` 自行添加。
 
+## 📥 下载与安装 (Download & Setup)
+
+在开始配置和使用之前，请先将本项目下载到本地，并安装必要的 Python 依赖库。
+
+### 1. 获取代码
+你可以通过 Git 克隆仓库，或者直接下载 ZIP 压缩包：
+
+* **方法 A：使用 Git 克隆 (推荐)**
+    打开终端 (Terminal)，运行以下命令：
+    ```bash
+    git clone https://github.com/Jingyuan-Zheng/Mac-Lite-Translator_TranslateGemma.git
+    cd Mac-Lite-Translator_TranslateGemma
+    ```
+
+* **方法 B：下载 ZIP**
+    点击页面右上角的绿色 **Code** 按钮 -> 选择 **Download ZIP**。
+    下载完成后解压，并在终端中进入该文件夹路径：
+    ```bash
+    cd /你的/下载/路径/Mac-Lite-Translator_TranslateGemma
+    ```
+
+### 2. 安装依赖
+确保你的电脑已安装 Python（建议 3.10 及以上版本）。在终端中运行以下命令，一次性安装所有必要的库（如 MLX 等）：
+
+```bash
+pip install -r requirements.txt
+```
 
 ## ⚙️ 配置指南 (语言设置)
 
@@ -154,11 +188,14 @@ USER_PRIMARY_FOREIGN_LANG = "English"  # 您的主要学习/目标外语
 ## ❓ 常见问题 (FAQ)
 
 **Q: 是否支持多模态（即读取图片翻译）？**
+
 **A:** 不支持。虽然 Google 原版 Gemma 支持，但目前的 HuggingFace MLX 版本暂不支持。
 *细节*：我们测试过多模态版本，但由于无法实现流式输出且速度较慢，为了保证最佳体验，暂未加入。
 
 **Q: 能否使用 Ollama 作为后端？**
+
 **A:** 暂时没有提供。在 Mac 平台上，**MLX** 的速度和内存效率远高于 Ollama，因此我们首选 MLX。
 
 **Q: 支持 Windows 或 Linux 吗？**
+
 **A:** 理论上支持，但需要修改代码。你需要移除 macOS 专用的 UI 代码（如 AppKit、Dock 图标），并将 `mlx-lm` 替换为 `ollama` 或 `transformers` 才能在其他平台上运行。
