@@ -62,7 +62,7 @@ https://github.com/user-attachments/assets/63cae308-71da-452e-8c8a-0f5a54464e74
 
 > **📝 提示**：`translategemma` 模型实际支持多达 **55 种语言**。如果列表里没有你需要的语言，可以直接修改源代码中的 `self.languages` 自行添加。
 
-## 📥 下载与安装 (Download & Setup)
+## 📥 下载与安装
 
 在开始配置和使用之前，请先将本项目下载到本地，并安装必要的 Python 依赖库。
 
