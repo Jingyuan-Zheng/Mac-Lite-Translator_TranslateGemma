@@ -91,6 +91,7 @@ Make sure you have Python installed (Python 3.10+ is recommended). Run the follo
 
 ```bash
 pip install -r requirements.txt
+```
 
 ## ⚙️ Configuration (Language Setup)
 
