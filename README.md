@@ -75,7 +75,7 @@ You can clone the repository via Git or download the ZIP file directly.
 * **Method A: Git Clone (Recommended)**
     Open your Terminal and run:
     ```bash
-    git clone [https://github.com/Jingyuan-Zheng/Mac-Lite-Translator_TranslateGemma.git](https://github.com/Jingyuan-Zheng/Mac-Lite-Translator_TranslateGemma.git)
+    git clone https://github.com/Jingyuan-Zheng/Mac-Lite-Translator_TranslateGemma.git
     cd Mac-Lite-Translator_TranslateGemma
     ```
 
