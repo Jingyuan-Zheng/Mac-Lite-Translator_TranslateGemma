@@ -114,7 +114,7 @@ You can run this tool in three ways. Choose the one that fits your workflow.
 
 ### Method 1: macOS Shortcuts (Recommended - Native Experience)
 
-![Shortcut Details](Screenshots/Shortcut Details.png)
+![Shortcut Details](Screenshots/Shortcut_Details.png)
 
 [🤔 If you are lazy, you can just download the shortcut on this repository and change the path in the shortcut.]
 
