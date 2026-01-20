@@ -111,7 +111,7 @@ USER_PRIMARY_FOREIGN_LANG = "English"  # 您的主要学习/目标外语
 
 ### 方式 1：macOS 快捷指令 (推荐 - 原生体验)
 
-![Shortcut Details](Screenshots/Shortcut Details.png)
+![Shortcut Details](Screenshots/Shortcut_Details.png)
 
 【🤔 如果懒得折腾，你也可以直接从这个仓库里找到该快捷指令，然后把路径改一下就行啦～】
 
