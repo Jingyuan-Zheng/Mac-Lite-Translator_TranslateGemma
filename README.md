@@ -11,6 +11,13 @@ The best part? It integrates seamlessy into your system via **macOS Shortcuts**.
 
 **No API keys. No internet required. 100% Private.**
 
+## Demo
+
+
+https://github.com/user-attachments/assets/63cae308-71da-452e-8c8a-0f5a54464e74
+
+
+
 ## 📸 Screenshots
 
 ![GUI](Screenshots/GUI.png)
@@ -57,6 +64,33 @@ The app comes pre-configured with the following languages:
 *   Maltese (Malti)
 
 > **📝 Note:** The underlying `translategemma` model actually supports **55 languages**. If your desired language is not listed, you can easily add it by modifying the `self.languages` list in the source code.
+
+## 📥 Download & Setup
+
+Before configuring or running the app, you need to download the source code and install the required dependencies.
+
+### 1. Get the Code
+You can clone the repository via Git or download the ZIP file directly.
+
+* **Method A: Git Clone (Recommended)**
+    Open your Terminal and run:
+    ```bash
+    git clone [https://github.com/Jingyuan-Zheng/Mac-Lite-Translator_TranslateGemma.git](https://github.com/Jingyuan-Zheng/Mac-Lite-Translator_TranslateGemma.git)
+    cd Mac-Lite-Translator_TranslateGemma
+    ```
+
+* **Method B: Download ZIP**
+    Click the green **Code** button at the top right of this page -> Select **Download ZIP**.
+    Unzip the file and navigate to the folder in your Terminal:
+    ```bash
+    cd /path/to/your/downloaded/Mac-Lite-Translator_TranslateGemma
+    ```
+
+### 2. Install Dependencies
+Make sure you have Python installed (Python 3.10+ is recommended). Run the following command to install all required libraries (including MLX) listed in `requirements.txt`:
+
+```bash
+pip install -r requirements.txt
 
 ## ⚙️ Configuration (Language Setup)
 
@@ -156,11 +190,14 @@ For developers or debugging.
 ## ❓ F.A.Q.
 
 **Q: Does it support Multimodal input (Images)?**
+
 **A:** No. While Google's original Gemma model supports multimodal input, the current MLX version on HuggingFace does not.
 *Detail:* I tested a custom multimodal implementation, but it was excluded because it lacks streaming support and is significantly slower than the text-only version.
 
 **Q: Can I use Ollama instead of MLX?**
+
 **A:** Technically yes, but not in this repo. On macOS, **MLX** is significantly faster and more memory-efficient than Ollama due to direct optimization for Apple Silicon.
 
 **Q: Does this work on Windows or Linux?**
+
 **A:** Not out of the box. The UI is cross-platform (`tkinter`), but you would need to remove the macOS-specific code (AppKit, Dock icons) and replace the `mlx-lm` backend with `ollama` or `transformers`.
