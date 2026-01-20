@@ -355,7 +355,8 @@ class TranslatorApp:
     def setup_macos_integration(self):
         info = AppKit.NSBundle.mainBundle().infoDictionary()
         info['CFBundleName'] = "Translator"
-        icon_path = "/Users/jingyuan/Library/Mobile Documents/iCloud~is~workflow~my~workflows/Documents/translator.icns"
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        icon_path = os.path.join(current_dir, "translator.icns")
         if os.path.exists(icon_path):
             image = AppKit.NSImage.alloc().initWithContentsOfFile_(icon_path)
             if image:
