@@ -1,204 +1,156 @@
-# 🌐 Lite Translator for Mac (TranslateGemma)
+# Mac Lite Translator for TranslateGemma
 
-中文说明可点击下方：
-- [简体中文](README-zh.md)
+[简体中文](README-zh.md)
 
-**Experience AI translation that feels native to macOS.**
+A native macOS translator for the local **TranslateGemma** MLX model. It is designed for quick translation from any app through macOS Shortcuts, while keeping the model loaded only once in memory.
 
-This is a high-performance local translation tool built specifically for **Apple Silicon Macs (M1/M2/M3/M4)**. Powered by Apple's [MLX framework](https://github.com/ml-explore/mlx), it runs Large Language Models (LLMs) entirely on your device.
+## Highlights
 
-The best part? It integrates seamlessy into your system via **macOS Shortcuts**. You can **translate text with a Right-Click or a Keyboard Shortcut** from any app—just like a built-in system feature!
+![AppKit GUI](Screenshots/AppKit_GUI.png)
 
-**No API keys. No internet required. 100% Private.**
+- Native AppKit interface with light/dark appearance support.
+- Local translation through `mlx-lm`; no API key and no network call after the model is downloaded.
+- macOS Shortcuts friendly: selected text can be sent from the Services menu or a keyboard shortcut.
+- Single-instance runtime: repeated Shortcut calls reuse the existing app window and backend instead of loading another model copy.
+- Auto target-language switching and source-language detection.
+- Translation styles: Default, Academic, Web Chat, Casual, and Dictionary.
+- English and Simplified Chinese GUI, with Auto mode based on the system language.
 
-## Demo
+## Requirements
 
+- Apple Silicon Mac.
+- macOS 13 or later.
+- Python 3.10+ with `mlx-lm`.
+- A local TranslateGemma MLX model folder, for example `translategemma-12b-it-4bit`.
+- 16GB unified memory is recommended for the 12B 4-bit model.
 
-https://github.com/user-attachments/assets/63cae308-71da-452e-8c8a-0f5a54464e74
+## Install Dependencies
 
-
-
-## 📸 Screenshots
-
-![GUI](Screenshots/GUI.png)
-
-## 🤖 About the Model & Performance
-
-This application uses **`translategemma-12b-it-4bit`**, a specialized fine-tune of Google's Gemma model optimized for translation tasks.
-
-*   **Performance:** On Apple Silicon, the MLX framework allows this 12B parameter model to run with exceptional speed (often exceeding reading speed).
-*   **Hardware Requirements:**
-    *   **Chip:** Apple M1/M2/M3/M4 (Pro/Max/Ultra recommended for best speeds, but base chips work).
-    *   **RAM:** **16GB Unified Memory** is recommended.
-    *   *Note:* The 4-bit quantized model requires approximately 8-9GB of RAM. It may run on 8GB machines if no other heavy apps are open.
-
-## ✨ Features
-
-*   **🚀 Instant & Accurate:** Click and use immediately. Delivers high-quality translations without needing an internet connection (once the model is downloaded).
-*   **🎨 Native Mac UI:**
-    *   **System Integration:** Supports macOS **Menu Bar** and **Dock** operations.
-    *   **Theme Support:** Automatically adapts to **Light Mode** and **Dark Mode**.
-    *   **Beautiful Icon:** Features a native-style icon (Source: [macOSicons.com](https://macosicons.com/#/), you can customize it easily).
-*   **🧠 Context Aware:**
-    *   **Auto-Dictionary Mode:** Detects single words/phrases and automatically provides definitions, phonetics (IPA), and examples.
-    *   **Smart Style Switching:** Choose between *Default, Academic, Casual, Web Chat*, and more.
-*   **🔄 Smart Swap:** Swapping languages automatically detects the original text language to reset the target direction.
-
-## 🌍 Supported Languages
-
-The app comes pre-configured with the following languages:
-
-*   English
-*   Simplified Chinese (简体中文)
-*   Traditional Chinese (繁體中文)
-*   Japanese (日本語)
-*   Korean (한국어)
-*   French (Français)
-*   German (Deutsch)
-*   Italian (Italiano)
-*   Spanish (Español)
-*   Russian (Русский)
-*   Portuguese (Português)
-*   Arabic (العربية)
-*   Hindi (हिन्दी)
-*   Maltese (Malti)
-
-> **📝 Note:** The underlying `translategemma` model actually supports **55 languages**. If your desired language is not listed, you can easily add it by modifying the `self.languages` list in the source code.
-
-## 📥 Download & Setup
-
-Before configuring or running the app, you need to download the source code and install the required dependencies.
-
-### 1. Get the Code
-You can clone the repository via Git or download the ZIP file directly.
-
-* **Method A: Git Clone (Recommended)**
-    Open your Terminal and run:
-    ```bash
-    git clone https://github.com/Jingyuan-Zheng/Mac-Lite-Translator_TranslateGemma.git
-    cd Mac-Lite-Translator_TranslateGemma
-    ```
-
-* **Method B: Download ZIP**
-    Click the green **Code** button at the top right of this page -> Select **Download ZIP**.
-    Unzip the file and navigate to the folder in your Terminal:
-    ```bash
-    cd /path/to/your/downloaded/Mac-Lite-Translator_TranslateGemma
-    ```
-
-### 2. Install Dependencies
-Make sure you have Python installed (Python 3.10+ is recommended). Run the following command to install all required libraries (including MLX) listed in `requirements.txt`:
+Use the Python environment you want the app to use:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## ⚙️ Configuration (Language Setup)
+If the dependencies are installed in a non-default Python environment, set `TRANSLATE_TEXT_PYTHON` when launching the app from Shortcuts.
 
-Before running the app, open `translator.py` in any text editor (like VS Code, TextEdit, or Sublime Text) to set your preferred languages.
+## Build the App
 
-Look for the **USER CONFIGURATION** section near the top:
-
-```python
-# ================= USER CONFIGURATION =================
-USER_NATIVE_LANG = "English"           # Your Native Language
-USER_PRIMARY_FOREIGN_LANG = "Español"  # Your Primary Target Language
-# ======================================================
+```bash
+python3 App/build_app.py
 ```
-*   **Why do this?** This determines the default translation direction. If you copy text in your native language, it auto-translates to the foreign one, and vice versa.
-*   *Note: Ensure the language names match exactly with the `self.languages` list further down in the code.*
 
-## 🚀 Installation & Usage Methods
+The app bundle is created at:
 
-You can run this tool in three ways. Choose the one that fits your workflow.
+```text
+outputs/Translate Text.app
+```
 
-### Method 1: macOS Shortcuts (Recommended - Native Experience)
+You can move it to `/Applications` if you want:
 
-![Shortcut Details](Screenshots/Shortcut_Details.png)
+```bash
+cp -R "outputs/Translate Text.app" /Applications/
+```
 
-[🤔 If you are lazy, you can just download the shortcut on this repository and change the path in the shortcut.]
+## First Launch
 
-Integrate the translator directly into macOS so you can right-click any text to translate it.
+1. Open `Translate Text.app`.
+2. Choose `Settings...` from the app menu.
+3. Select your local TranslateGemma model folder.
+4. Optionally set the native language, primary foreign language, and GUI language.
 
-1.  **Find your Python Path:**
-    *   Open Terminal.
-    *   If you use **Anaconda**, type: `which python` (make sure your conda env is active). It usually looks like `/opt/anaconda3/bin/python`.
-    *   If you use a **Virtual Environment**, use the absolute path to the python executable inside it (e.g., `/Users/name/my_project/.venv/bin/python`).
-    *   *Copy this path, you will need it.*
+The repository does not ship with a personal default model path. You must choose the model folder on first use.
 
-2.  **Create the Shortcut:**
-    *   Open the **Shortcuts** app.
-    *   Click `+` to create a new shortcut.
-    *   **Right Sidebar (Info/i):**
-        *   Check **"Show in Share Sheet"**.
-        *   Check **"Use as Quick Action"**.
-        *   Ensure **"Services Menu"** and **"Finder"** are selected.
-        *   *(Optional)* Add a keyboard shortcut (e.g., `control+T`).
-    *   **The Workflow Actions:**
-        *   **Input:** Set to "Receive **Text** from **Quick Actions, Share Sheet**".
-        *   **Action:** Drag in **"Run Shell Script"**.
-        *   **Shell:** Select `/bin/zsh`.
-        *   **Pass Input:** Select **"as arguments"** (Crucial!).
-        *   **Script:** Enter the command below (replace paths with yours):
+## Use with macOS Shortcuts
 
-        ```bash
-        # Template
-        /FULL/PATH/TO/YOUR/python '/FULL/PATH/TO/translator.py' "$1"
-        
-        # Example (Anaconda User):
-        /opt/anaconda3/bin/python '/Users/yourname/Documents/translator.py' "$1"
-        ```
+Create a Shortcut that receives **Text** from Quick Actions or the Share Sheet, then add a **Run Shell Script** action with input passed **as arguments**.
 
-3.  **How to use:**
-    *   Highlight text in **any app** (Chrome, PDF, Notes, etc.).
-    *   Right-Click -> **Services** -> **Translate Text**.
-    *   (Or use the keyboard shortcut you defined).
+Example if the app is in `/Applications`:
 
-### Method 2: Create a Standalone App (via Automator)
+```bash
+'/Applications/Translate Text.app/Contents/MacOS/Translate Text' "$1" >/dev/null 2>&1 &
+```
 
-If you prefer a clickable app icon in your Dock or Launchpad.
+If your Python dependencies are in a specific environment, set the Python executable explicitly:
 
-1.  Open **Automator** on your Mac.
-2.  Choose **"Application"** as the document type.
-3.  Search for **"Run Shell Script"** and double-click to add it.
-4.  Set **Pass input** to **"as arguments"**.
-5.  Paste the same command as above:
-    ```bash
-    /opt/anaconda3/bin/python '/Users/yourname/Documents/translator.py'
-    ```
-    *(Note: You don't need "$1" here if you just want to open the empty window).*
-6.  Save it as `AI Translator.app` to your Applications folder.
+```bash
+export TRANSLATE_TEXT_PYTHON="/path/to/your/python"
+'/Applications/Translate Text.app/Contents/MacOS/Translate Text' "$1" >/dev/null 2>&1 &
+```
 
-### Method 3: Command Line (Terminal)
+This direct executable call is intentional. It lets the app receive new Shortcut text even when an older app window is already open. The second invocation forwards the text to the existing instance and exits without loading another model.
 
-For developers or debugging.
+## Command Line Use
 
-*   **Direct Run:**
-    ```bash
-    # Ensure you are in the correct directory or use full paths
-    python translator.py
-    ```
-*   **Pipe Text (Instant Translate):**
-    Great for scripting.
-    ```bash
-    echo "This is a test sentence." | python translator.py
-    ```
-*   **With Arguments:**
-    ```bash
-    python translator.py "Hello world"
-    ```
+```bash
+'outputs/Translate Text.app/Contents/MacOS/Translate Text' "Hello world"
+```
 
-## ❓ F.A.Q.
+## Supported Languages
 
-**Q: Does it support Multimodal input (Images)?**
+The GUI includes:
 
-**A:** No. While Google's original Gemma model supports multimodal input, the current MLX version on HuggingFace does not.
-*Detail:* I tested a custom multimodal implementation, but it was excluded because it lacks streaming support and is significantly slower than the text-only version.
+- 简体中文
+- 繁體中文
+- English
+- 日本語
+- 한국어
+- Français
+- Deutsch
+- Italiano
+- Español
+- Русский
+- Português
+- العربية
+- हिन्दी
+- Malti
 
-**Q: Can I use Ollama instead of MLX?**
+The underlying TranslateGemma model may support more languages. Add more entries in `App/Sources/TranslateText.swift` and `App/Workers/translate_text_worker.py` if needed.
 
-**A:** Technically yes, but not in this repo. On macOS, **MLX** is significantly faster and more memory-efficient than Ollama due to direct optimization for Apple Silicon.
+## Project Structure
 
-**Q: Does this work on Windows or Linux?**
+```text
+App/
+  Sources/TranslateText.swift       Native macOS app
+  Workers/translate_text_worker.py  MLX translation backend
+  build_app.py                      App bundle builder
+assets/
+  translator.icns
+legacy/tk/
+  translate.py                      Archived Tkinter version
+Screenshots/
+```
 
-**A:** Not out of the box. The UI is cross-platform (`tkinter`), but you would need to remove the macOS-specific code (AppKit, Dock icons) and replace the `mlx-lm` backend with `ollama` or `transformers`.
+## Legacy Tkinter Version
+
+The original Python/Tkinter implementation is kept under `legacy/tk/` for reference. The Swift AppKit app is the maintained version. The old demo video is preserved in `legacy/tk/README.md`.
+
+## FAQ
+
+**Where do I get the model?**
+
+Download a TranslateGemma MLX model from Hugging Face or your preferred model manager, then select that local model folder in Settings. This repository does not include model weights.
+
+**Why does the app require selecting a model path?**
+
+Model folders are large and machine-specific. The open-source version intentionally ships without any personal default path. The path is stored locally in macOS UserDefaults after you choose it.
+
+**How much memory do I need?**
+
+For `translategemma-12b-it-4bit`, 16GB unified memory is recommended. The model can take several GB of RAM. The app uses a single-instance lock so repeated Shortcut calls reuse one loaded model instead of loading multiple copies.
+
+**Does it support image or multimodal translation?**
+
+No. This app is text-only. The current MLX TranslateGemma workflow here is optimized for fast streaming text translation.
+
+**Can I use Ollama instead of MLX?**
+
+Not in this version. The backend is built around `mlx-lm` because it is efficient on Apple Silicon and supports streaming output for this workflow.
+
+**Does it work on Windows or Linux?**
+
+No. The maintained UI is a macOS AppKit app, and the integration targets macOS Shortcuts. The translation worker is Python, but the app shell is macOS-specific.
+
+## License
+
+MIT
