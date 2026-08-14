@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import UniformTypeIdentifiers
 import Darwin
 
@@ -11,7 +12,9 @@ let singleInstanceNotificationName = Notification.Name("local.shortcut-translate
 let defaultNativeLanguage = "简体中文"
 let defaultPrimaryForeignLanguage = "English"
 let defaultModelPath = ""
+let defaultCloudBackend = "Google"
 let guiLanguageOptions = ["Auto", "English", "简体中文"]
+let cloudBackendOptions = ["Google", "Bing"]
 let languages: [Language] = [
     Language(name: "简体中文", code: "zh"),
     Language(name: "繁體中文", code: "zh-Hant"),
@@ -30,12 +33,91 @@ let languages: [Language] = [
 ]
 let styles = ["Default", "Academic", "Web Chat", "Casual", "Dictionary"]
 
-func readLaunchText() -> String {
-    let args = CommandLine.arguments.dropFirst()
-    if !args.isEmpty {
-        return args.joined(separator: " ")
+struct LaunchRequest {
+    let text: String
+    let backendOverride: String?
+    let usesLightUI: Bool
+    let restoredTarget: String?
+    let restoredTranslation: String?
+}
+
+func normalizedBackendOverride(_ value: String?) -> String? {
+    guard let value else { return nil }
+    let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    switch normalized {
+    case "cloud", "google", "bing", "gemma", "local":
+        return normalized == "local" ? "gemma" : normalized
+    default:
+        return nil
     }
-    return "Hello, waiting for input..."
+}
+
+func parseLaunchRequest() -> LaunchRequest {
+    let args = CommandLine.arguments.dropFirst()
+    var backendOverride: String?
+    var usesLightUI = false
+    var restoredTarget: String?
+    var restoredTranslation: String?
+    var textParts: [String] = []
+    var index = args.startIndex
+
+    while index < args.endIndex {
+        let arg = args[index]
+        if arg == "--" {
+            let rest = args[args.index(after: index)..<args.endIndex]
+            textParts.append(contentsOf: rest)
+            break
+        } else if arg == "--cloud" {
+            backendOverride = "cloud"
+        } else if arg == "--light" {
+            usesLightUI = true
+        } else if arg == "--restore-target" {
+            let nextIndex = args.index(after: index)
+            if nextIndex < args.endIndex {
+                restoredTarget = args[nextIndex]
+                index = nextIndex
+            }
+        } else if arg == "--restore-translation-base64" {
+            let nextIndex = args.index(after: index)
+            if nextIndex < args.endIndex,
+               let data = Data(base64Encoded: args[nextIndex]),
+               let translation = String(data: data, encoding: .utf8) {
+                restoredTranslation = translation
+                index = nextIndex
+            }
+        } else if arg == "--google" {
+            backendOverride = "google"
+        } else if arg == "--bing" {
+            backendOverride = "bing"
+        } else if arg == "--gemma" || arg == "--local" {
+            backendOverride = "gemma"
+        } else if arg == "--backend" || arg == "--engine" {
+            let nextIndex = args.index(after: index)
+            if nextIndex < args.endIndex, let backend = normalizedBackendOverride(args[nextIndex]) {
+                backendOverride = backend
+                index = nextIndex
+            }
+        } else if arg.hasPrefix("--backend=") {
+            backendOverride = normalizedBackendOverride(String(arg.dropFirst("--backend=".count))) ?? backendOverride
+        } else if arg.hasPrefix("--engine=") {
+            backendOverride = normalizedBackendOverride(String(arg.dropFirst("--engine=".count))) ?? backendOverride
+        } else {
+            textParts.append(arg)
+        }
+        index = args.index(after: index)
+    }
+    let text = textParts.isEmpty ? "Hello, waiting for input..." : textParts.joined(separator: " ")
+    return LaunchRequest(
+        text: text,
+        backendOverride: backendOverride,
+        usesLightUI: usesLightUI,
+        restoredTarget: restoredTarget,
+        restoredTranslation: restoredTranslation
+    )
+}
+
+func readLaunchText() -> String {
+    parseLaunchRequest().text
 }
 
 final class SingleInstanceLock {
@@ -53,20 +135,295 @@ final class SingleInstanceLock {
         return false
     }
 
-    func forward(text: String) {
+    func forward(request: LaunchRequest) {
+        let userInfo: [String: String] = [
+            "text": request.text,
+            "backend": request.backendOverride ?? "gemma",
+            "ui": request.usesLightUI ? "light" : "full",
+        ]
         DistributedNotificationCenter.default().postNotificationName(
             singleInstanceNotificationName,
             object: nil,
-            userInfo: ["text": text],
+            userInfo: userInfo,
             deliverImmediately: true
         )
     }
 
+    func release() {
+        guard fileDescriptor >= 0 else { return }
+        flock(fileDescriptor, LOCK_UN)
+        close(fileDescriptor)
+        fileDescriptor = -1
+    }
+
     deinit {
-        if fileDescriptor >= 0 {
-            flock(fileDescriptor, LOCK_UN)
-            close(fileDescriptor)
+        release()
+    }
+}
+
+// Light-mode panel adapted from TranslateKit's FloatingPanel and TranslationView.
+// TranslateKit is MIT licensed; the complete notice is bundled as TRANSLATEKIT_LICENSE.txt.
+final class LightTranslationModel: ObservableObject {
+    @Published var sourceText: String
+    @Published var translatedText = ""
+    @Published var statusText = "Preparing..."
+    @Published var backendName = ""
+    @Published var targetLanguage: String
+    @Published var isLoading = true
+    @Published var errorMessage: String?
+
+    let targetLanguages: [String]
+    var onTargetChange: ((String) -> Void)?
+    var onShowFullUI: (() -> Void)?
+
+    init(sourceText: String, targetLanguage: String, targetLanguages: [String]) {
+        self.sourceText = sourceText
+        self.targetLanguage = targetLanguage
+        self.targetLanguages = targetLanguages
+    }
+}
+
+struct LightTranslationView: View {
+    @ObservedObject var model: LightTranslationModel
+    var onSizeChange: ((CGSize) -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            Divider().padding(.horizontal, 12)
+            content
+            Divider().padding(.horizontal, 12)
+            footer
         }
+        .background(LightVisualEffectBackground())
+        .frame(width: 480)
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: LightViewSizeKey.self, value: proxy.size)
+            }
+        )
+        .onPreferenceChange(LightViewSizeKey.self) { size in
+            onSizeChange?(size)
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "translate")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.blue)
+            Text("Translate Text")
+                .font(.system(size: 13, weight: .semibold))
+            Spacer()
+
+            Menu {
+                ForEach(model.targetLanguages, id: \.self) { language in
+                    Button {
+                        guard language != model.targetLanguage else { return }
+                        model.targetLanguage = language
+                        model.onTargetChange?(language)
+                    } label: {
+                        if language == model.targetLanguage {
+                            Label(language, systemImage: "checkmark")
+                        } else {
+                            Text(language)
+                        }
+                    }
+                }
+            } label: {
+                Text(model.targetLanguage)
+                    .font(.system(size: 11))
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+
+            Button {
+                NSApp.keyWindow?.close()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(.escape, modifiers: [])
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("ORIGINAL")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                ScrollView {
+                    Text(model.sourceText)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 140)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("TRANSLATION")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.tertiary)
+
+                Group {
+                    if model.isLoading {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text(model.statusText)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                    } else if let error = model.errorMessage {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                            Text(error)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                    } else {
+                        ScrollView {
+                            Text(model.translatedText)
+                                .font(.system(size: 15, weight: .medium))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
+                        }
+                        .frame(maxHeight: 320)
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity)
+                .background(Color(nsColor: .windowBackgroundColor).opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private var footer: some View {
+        HStack {
+            Label(model.backendName, systemImage: model.backendName.contains("Gemma") ? "cpu" : "cloud")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+
+            Spacer()
+
+            Button {
+                model.onShowFullUI?()
+            } label: {
+                Label("Full UI", systemImage: "macwindow")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.borderless)
+
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(model.translatedText, forType: .string)
+            } label: {
+                Label("Copy", systemImage: "doc.on.doc")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.borderless)
+            .disabled(model.translatedText.isEmpty)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+}
+
+struct LightViewSizeKey: PreferenceKey {
+    static var defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        value = nextValue()
+    }
+}
+
+struct LightVisualEffectBackground: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .hudWindow
+        view.blendingMode = .behindWindow
+        view.state = .active
+        view.wantsLayer = true
+        view.layer?.cornerRadius = 12
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+}
+
+final class LightTranslationPanel: NSPanel, NSWindowDelegate {
+    var onClose: (() -> Void)?
+
+    init() {
+        super.init(
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 320),
+            styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        delegate = self
+        isFloatingPanel = true
+        level = .floating
+        collectionBehavior = [.canJoinAllSpaces, .transient]
+        titleVisibility = .hidden
+        titlebarAppearsTransparent = true
+        isMovableByWindowBackground = true
+        animationBehavior = .utilityWindow
+        standardWindowButton(.closeButton)?.isHidden = true
+        standardWindowButton(.miniaturizeButton)?.isHidden = true
+        standardWindowButton(.zoomButton)?.isHidden = true
+        backgroundColor = .clear
+        hasShadow = true
+    }
+
+    func presentNearCursor() {
+        let mouseLocation = NSEvent.mouseLocation
+        guard let screenFrame = NSScreen.main?.visibleFrame else {
+            center()
+            orderFrontRegardless()
+            return
+        }
+        let size = frame.size
+        var x = mouseLocation.x - size.width / 2
+        var y = mouseLocation.y - size.height - 16
+        x = max(screenFrame.minX + 8, min(x, screenFrame.maxX - size.width - 8))
+        y = max(screenFrame.minY + 8, min(y, screenFrame.maxY - size.height - 8))
+        setFrameOrigin(NSPoint(x: x, y: y))
+        orderFrontRegardless()
+        makeKey()
+    }
+
+    func updateContentSize(_ size: CGSize) {
+        guard size.width > 0, size.height > 0, size != frame.size else { return }
+        let topLeft = NSPoint(x: frame.minX, y: frame.maxY)
+        setContentSize(size)
+        setFrameTopLeftPoint(topLeft)
+        guard let screenFrame = screen?.visibleFrame ?? NSScreen.main?.visibleFrame else { return }
+        var origin = frame.origin
+        origin.x = max(screenFrame.minX + 8, min(origin.x, screenFrame.maxX - frame.width - 8))
+        origin.y = max(screenFrame.minY + 8, min(origin.y, screenFrame.maxY - frame.height - 8))
+        if origin != frame.origin { setFrameOrigin(origin) }
+    }
+
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+
+    func windowWillClose(_ notification: Notification) { onClose?() }
+    override func cancelOperation(_ sender: Any?) { close() }
+
+    override func keyDown(with event: NSEvent) {
+        event.keyCode == 53 ? close() : super.keyDown(with: event)
     }
 }
 
@@ -76,6 +433,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
     private var loadingView: NSVisualEffectView!
     private var mainContent: NSStackView!
     private var statusLabel: NSTextField!
+    private var subtitleLabel: NSTextField!
     private var loadingStatusLabel: NSTextField!
     private var footerStatusLabel: NSTextField!
     private var loadingProgress: NSProgressIndicator!
@@ -87,6 +445,8 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
     private var translationHeaderLabel: NSTextField!
     private var targetPopup: NSPopUpButton!
     private var stylePopup: NSPopUpButton!
+    private var backendModeControl: NSSegmentedControl!
+    private var backendSwitchProgress: NSProgressIndicator!
     private var expandButton: NSButton!
     private var updateButton: NSButton!
     private var swapButton: NSButton!
@@ -98,14 +458,25 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
     private var settingsNativePopup: NSPopUpButton?
     private var settingsForeignPopup: NSPopUpButton?
     private var settingsGuiPopup: NSPopUpButton?
+    private var settingsCloudBackendPopup: NSPopUpButton?
     private var settingsModelField: NSTextField?
     private let instanceLock: SingleInstanceLock
+    private var lightPanel: LightTranslationPanel?
+    private var lightModel: LightTranslationModel?
 
     private var worker: Process?
     private var workerInput: Pipe?
     private var isReady = false
+    private var isSwitchingBackend = false
+    private var isSyncingBackendModeControl = false
+    private var localBackendReady = false
+    private var backendBeforeSwitch: String?
     private var isOriginalExpanded = false
     private var initialText = "Hello, waiting for input..."
+    private var launchBackendOverride: String?
+    private var usesLightUI: Bool
+    private var restoredTarget: String?
+    private var restoredTranslation: String?
     private var lastForeignLanguage: String {
         get { settingString("primaryForeignLanguage", fallback: defaultPrimaryForeignLanguage) }
         set { UserDefaults.standard.set(newValue, forKey: "primaryForeignLanguage") }
@@ -123,6 +494,11 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         settingString("modelPath", fallback: defaultModelPath)
     }
 
+    private var cloudBackendSetting: String {
+        let value = UserDefaults.standard.string(forKey: "cloudBackend") ?? defaultCloudBackend
+        return cloudBackendOptions.contains(value) ? value : defaultCloudBackend
+    }
+
     private var guiLanguageSetting: String {
         UserDefaults.standard.string(forKey: "guiLanguage") ?? "Auto"
     }
@@ -138,8 +514,23 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         Bundle.main.path(forResource: "translate_text_worker", ofType: "py") ?? ""
     }
 
-    init(initialText: String, instanceLock: SingleInstanceLock) {
-        self.initialText = initialText
+    private var activeWorkerBackend: String {
+        switch launchBackendOverride {
+        case "cloud":
+            return cloudBackendSetting.lowercased()
+        case "google", "bing", "gemma":
+            return launchBackendOverride!
+        default:
+            return "gemma"
+        }
+    }
+
+    init(launchRequest: LaunchRequest, instanceLock: SingleInstanceLock) {
+        self.initialText = launchRequest.text
+        self.launchBackendOverride = launchRequest.backendOverride
+        self.usesLightUI = launchRequest.usesLightUI
+        self.restoredTarget = launchRequest.restoredTarget
+        self.restoredTranslation = launchRequest.restoredTranslation
         self.instanceLock = instanceLock
         super.init()
     }
@@ -153,10 +544,24 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
             suspensionBehavior: .deliverImmediately
         )
         buildWindow()
+        if let restoredTarget {
+            targetPopup.selectItem(withTitle: restoredTarget)
+            updateTranslationHeader()
+        }
+        if let restoredTranslation {
+            translationTextView.string = restoredTranslation
+        }
         buildMenu()
         startWorker()
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        if usesLightUI {
+            window.orderOut(nil)
+            showLightUI()
+        } else {
+            window.makeKeyAndOrderFront(nil)
+        }
+        if !usesLightUI {
+            NSApp.activate()
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -167,6 +572,91 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         DistributedNotificationCenter.default().removeObserver(self)
         sendCommand(["action": "quit"])
         worker?.terminate()
+    }
+
+    private func showLightUI() {
+        usesLightUI = true
+        window.orderOut(nil)
+
+        if let model = lightModel, let panel = lightPanel {
+            model.sourceText = originalTextView.string
+            model.targetLanguage = targetPopup.titleOfSelectedItem ?? nativeLanguage
+            model.backendName = backendDisplayName()
+            model.translatedText = translationTextView.string == tr("translating") + "..." ? "" : translationTextView.string
+            panel.presentNearCursor()
+            return
+        }
+
+        let model = LightTranslationModel(
+            sourceText: originalTextView.string,
+            targetLanguage: targetPopup.titleOfSelectedItem ?? nativeLanguage,
+            targetLanguages: languages.map(\.name)
+        )
+        model.backendName = backendDisplayName()
+        model.onTargetChange = { [weak self] language in
+            guard let self else { return }
+            self.targetPopup.selectItem(withTitle: language)
+            self.translateCurrentText()
+        }
+        model.onShowFullUI = { [weak self] in
+            self?.showFullUI()
+        }
+
+        let panel = LightTranslationPanel()
+        let view = LightTranslationView(model: model) { [weak panel] size in
+            panel?.updateContentSize(size)
+        }
+        let hostingView = NSHostingView(rootView: view)
+        panel.contentView = hostingView
+        panel.setContentSize(hostingView.fittingSize)
+        panel.onClose = { [weak self, weak panel] in
+            guard let self, self.usesLightUI, self.lightPanel === panel else { return }
+            NSApp.terminate(nil)
+        }
+        lightModel = model
+        lightPanel = panel
+        panel.presentNearCursor()
+    }
+
+    private func showFullUI() {
+        var arguments = ["--backend", activeWorkerBackend]
+        let target = targetPopup.titleOfSelectedItem ?? nativeLanguage
+        arguments += ["--restore-target", target]
+        let translation = translationTextView.string
+        if !translation.isEmpty, translation != tr("translating") + "..." {
+            arguments += ["--restore-translation-base64", Data(translation.utf8).base64EncodedString()]
+        }
+        arguments += ["--", originalTextView.string]
+        relaunch(arguments: arguments, activates: true)
+    }
+
+    private func relaunch(arguments: [String], activates: Bool) {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.arguments = arguments
+        configuration.activates = activates
+        configuration.createsNewApplicationInstance = true
+
+        if activates {
+            NSApp.activate()
+        }
+        let sourceApplication = NSRunningApplication.current
+        instanceLock.release()
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { [weak self] application, error in
+            DispatchQueue.main.async {
+                if let error {
+                    _ = self?.instanceLock.acquire()
+                    self?.showAlert(title: "Could Not Switch UI", message: error.localizedDescription)
+                    return
+                }
+                if activates, let application {
+                    NSApp.yieldActivation(to: application)
+                    _ = application.activate(from: sourceApplication, options: [.activateAllWindows])
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    NSApp.terminate(nil)
+                }
+            }
+        }
     }
 
     private func tr(_ key: String) -> String {
@@ -196,8 +686,14 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
             case "backendStopped": return "后端已停止"
             case "detected": return "检测到"
             case "settings": return "设置"
-            case "settingsSubtitle": return "配置默认语言、本地模型路径和界面语言。"
+            case "settingsSubtitle": return "配置默认语言、本地模型路径、云端翻译提供商和界面语言。"
             case "guiLanguage": return "界面语言"
+            case "cloudBackend": return "云端后端"
+            case "backendMode": return "模型"
+            case "localModel": return "本地"
+            case "cloudModel": return "云端"
+            case "loadingLocalModel": return "正在加载本地模型..."
+            case "switchingBackend": return "正在切换模型..."
             case "nativeLanguage": return "母语"
             case "primaryForeign": return "主要外语"
             case "modelPath": return "模型路径"
@@ -205,7 +701,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
             case "cancel": return "取消"
             case "save": return "保存"
             case "settingsSaved": return "设置已保存"
-            case "settingsSavedMessage": return "语言默认值已更新。模型路径和界面语言会在下次启动时生效。"
+            case "settingsSavedMessage": return "语言默认值和云端后端已更新。模型路径和界面语言会在下次启动时生效。"
             case "openTextFile": return "打开文本文件..."
             case "copyOriginalText": return "复制原文"
             case "expandCollapseOriginal": return "展开/收起原文"
@@ -243,8 +739,14 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         case "backendStopped": return "Backend stopped"
         case "detected": return "Detected"
         case "settings": return "Settings"
-        case "settingsSubtitle": return "Configure the default language pair, local model path, and interface language."
+        case "settingsSubtitle": return "Configure the default language pair, local model path, cloud translation provider, and interface language."
         case "guiLanguage": return "GUI Language"
+        case "cloudBackend": return "Cloud Backend"
+        case "backendMode": return "Model"
+        case "localModel": return "Local"
+        case "cloudModel": return "Cloud"
+        case "loadingLocalModel": return "Loading local model..."
+        case "switchingBackend": return "Switching model..."
         case "nativeLanguage": return "Native Language"
         case "primaryForeign": return "Primary Foreign"
         case "modelPath": return "Model Path"
@@ -252,7 +754,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         case "cancel": return "Cancel"
         case "save": return "Save"
         case "settingsSaved": return "Settings Saved"
-        case "settingsSavedMessage": return "Language defaults are updated. Model path and interface language changes apply the next time Translate Text launches."
+        case "settingsSavedMessage": return "Language defaults and cloud backend are updated. Model path and interface language changes apply the next time Translate Text launches."
         case "openTextFile": return "Open Text File..."
         case "copyOriginalText": return "Copy Original Text"
         case "expandCollapseOriginal": return "Expand/Collapse Original"
@@ -364,8 +866,8 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
     private func buildMainContent() {
         let title = label(tr("appTitle"), size: 26, weight: .bold)
         title.textColor = .labelColor
-        let subtitle = label(tr("subtitle"), size: 14)
-        let header = NSStackView(views: [title, subtitle])
+        subtitleLabel = label(subtitleText(), size: 14)
+        let header = NSStackView(views: [title, subtitleLabel])
         header.orientation = .vertical
         header.spacing = 3
         header.alignment = .leading
@@ -393,12 +895,44 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
         targetPopup = popup(languages.map(\.name), action: #selector(selectionChanged(_:)))
         stylePopup = popup(styles, action: #selector(selectionChanged(_:)))
+        backendModeControl = NSSegmentedControl(
+            labels: [tr("localModel"), tr("cloudModel")],
+            trackingMode: .selectOne,
+            target: self,
+            action: #selector(backendModeChanged(_:))
+        )
+        backendModeControl.controlSize = .large
+        backendModeControl.segmentStyle = .rounded
+        backendModeControl.segmentDistribution = .fillEqually
+        backendModeControl.selectedSegment = isUsingCloudBackend ? 1 : 0
+
+        backendSwitchProgress = NSProgressIndicator()
+        backendSwitchProgress.style = .spinning
+        backendSwitchProgress.controlSize = .small
+        backendSwitchProgress.isDisplayedWhenStopped = false
+        let backendSelectorRow = NSStackView(views: [backendModeControl, backendSwitchProgress])
+        backendSelectorRow.orientation = .horizontal
+        backendSelectorRow.alignment = .centerY
+        backendSelectorRow.spacing = 8
         autoSelectTargetLanguage(for: initialText)
 
         expandButton = button(tr("expandOriginal"), symbol: "arrow.up.left.and.arrow.down.right", action: #selector(toggleOriginal(_:)))
         updateButton = button(tr("updateTranslate"), symbol: "arrow.clockwise", action: #selector(updateAndTranslate(_:)))
         swapButton = button(tr("swap"), symbol: "arrow.left.arrow.right", action: #selector(swapAndTranslate(_:)))
         stopButton = button(tr("stop"), symbol: "stop.fill", action: #selector(stopTranslation(_:)))
+        stopButton.contentTintColor = .systemRed
+        if let redStopImage = NSImage(systemSymbolName: "stop.fill", accessibilityDescription: tr("stop"))?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.systemRed])) {
+            redStopImage.isTemplate = false
+            stopButton.image = redStopImage
+        }
+        stopButton.attributedTitle = NSAttributedString(
+            string: tr("stop"),
+            attributes: [
+                .foregroundColor: NSColor.systemRed,
+                .font: NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .regular),
+            ]
+        )
 
         let actionRow = NSStackView(views: [expandButton, updateButton, swapButton, stopButton])
         actionRow.orientation = .horizontal
@@ -409,6 +943,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         let optionsRow = NSStackView(views: [
             inlineControl(tr("target"), control: targetPopup),
             inlineControl(tr("style"), control: stylePopup),
+            inlineControl(tr("backendMode"), control: backendSelectorRow),
         ])
         optionsRow.orientation = .horizontal
         optionsRow.alignment = .centerY
@@ -495,8 +1030,11 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
             translationScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 240),
             footerProgress.widthAnchor.constraint(equalToConstant: 20),
             footerProgress.heightAnchor.constraint(equalToConstant: 20),
-            targetPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
-            stylePopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
+            targetPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 160),
+            stylePopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 160),
+            backendModeControl.widthAnchor.constraint(greaterThanOrEqualToConstant: 150),
+            backendSwitchProgress.widthAnchor.constraint(equalToConstant: 16),
+            backendSwitchProgress.heightAnchor.constraint(equalToConstant: 16),
         ])
 
         setControlsEnabled(false)
@@ -583,6 +1121,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
             process.arguments = ["python3", workerPath]
         }
         environment["TRANSLATE_TEXT_MODEL"] = modelPath
+        environment["TRANSLATE_TEXT_BACKEND"] = activeWorkerBackend
         process.environment = environment
 
         let input = Pipe()
@@ -637,34 +1176,99 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         switch event {
         case "ready":
             isReady = true
+            if activeWorkerBackend == "gemma" {
+                localBackendReady = true
+            }
             showMainPage()
             setControlsEnabled(true)
             footerProgress.stopAnimation(nil)
             footerStatusLabel.stringValue = tr("ready")
-            statusLabel.stringValue = modelDisplayName()
-            translateCurrentText()
+            updateBackendDependentControls()
+            lightModel?.statusText = tr("ready")
+            lightModel?.backendName = backendDisplayName()
+            if let restoredTranslation {
+                translationTextView.string = restoredTranslation
+                footerStatusLabel.stringValue = tr("complete")
+                self.restoredTranslation = nil
+            } else {
+                translateCurrentText()
+            }
         case "status":
-            setStatus(payload["text"] as? String ?? "")
+            let status: String
+            if isSwitchingBackend, activeWorkerBackend == "gemma" {
+                status = tr("loadingLocalModel")
+            } else {
+                status = payload["text"] as? String ?? ""
+            }
+            setStatus(status)
+            lightModel?.statusText = status
+        case "backend_ready":
+            guard isSwitchingBackend,
+                  let backend = payload["backend"] as? String,
+                  backend == activeWorkerBackend else { return }
+            if backend == "gemma" {
+                localBackendReady = true
+            }
+            isSwitchingBackend = false
+            backendBeforeSwitch = nil
+            backendSwitchProgress.stopAnimation(nil)
+            setControlsEnabled(true)
+            footerProgress.stopAnimation(nil)
+            footerStatusLabel.stringValue = tr("ready")
+            updateBackendDependentControls()
+            translateCurrentText()
         case "started":
             translationTextView.string = tr("translating") + "..."
             footerProgress.startAnimation(nil)
             footerStatusLabel.stringValue = tr("translating")
+            withAnimation {
+                lightModel?.translatedText = ""
+                lightModel?.errorMessage = nil
+                lightModel?.statusText = tr("translating") + "..."
+                lightModel?.isLoading = true
+            }
         case "replace":
             translationTextView.string = payload["text"] as? String ?? ""
+            lightModel?.translatedText = translationTextView.string
         case "token":
             appendTranslation(payload["text"] as? String ?? "")
+            lightModel?.translatedText = translationTextView.string
         case "complete":
             footerProgress.stopAnimation(nil)
             footerStatusLabel.stringValue = tr("complete")
+            withAnimation {
+                lightModel?.translatedText = translationTextView.string
+                lightModel?.statusText = tr("complete")
+                lightModel?.isLoading = false
+            }
         case "stopped":
             footerProgress.stopAnimation(nil)
             footerStatusLabel.stringValue = tr("stopped")
+            withAnimation {
+                lightModel?.statusText = tr("stopped")
+                lightModel?.isLoading = false
+            }
         case "error":
+            if isSwitchingBackend {
+                launchBackendOverride = backendBeforeSwitch
+                backendBeforeSwitch = nil
+                isSwitchingBackend = false
+                backendSwitchProgress.stopAnimation(nil)
+                setControlsEnabled(true)
+                updateBackendDependentControls()
+            }
             loadingProgress.stopAnimation(nil)
             footerProgress.stopAnimation(nil)
             loadingStatusLabel.stringValue = usesChineseUI ? "模型加载失败" : "Failed to load model"
             footerStatusLabel.stringValue = tr("failed")
-            showAlert(title: payload["title"] as? String ?? "Error", message: payload["message"] as? String ?? "Unknown error")
+            let message = payload["message"] as? String ?? "Unknown error"
+            withAnimation {
+                lightModel?.errorMessage = message
+                lightModel?.isLoading = false
+            }
+            if !usesLightUI {
+                showAlert(title: payload["title"] as? String ?? "Error", message: message)
+            }
         default:
             break
         }
@@ -684,8 +1288,27 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
     @objc private func handleExternalOpenRequest(_ notification: Notification) {
         guard let text = notification.userInfo?["text"] as? String else { return }
+        let requestedBackend = normalizedBackendOverride(notification.userInfo?["backend"] as? String)
+        let requestsLightUI = notification.userInfo?["ui"] as? String == "light"
+        if requestsLightUI, !usesLightUI {
+            var arguments = ["--light"]
+            if let requestedBackend {
+                arguments += ["--backend", requestedBackend]
+            }
+            arguments += ["--", text]
+            relaunch(arguments: arguments, activates: false)
+            return
+        }
+
+        launchBackendOverride = requestedBackend
         replaceOriginalText(text)
-        if let window {
+        if requestsLightUI {
+            showLightUI()
+        } else if usesLightUI {
+            lightModel?.sourceText = text
+            lightModel?.backendName = backendDisplayName()
+            lightPanel?.presentNearCursor()
+        } else if let window {
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         }
@@ -698,9 +1321,12 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
             return
         }
         originalTextView.string = newText
+        lightModel?.sourceText = newText
         translationTextView.string = ""
+        lightModel?.translatedText = ""
         autoSelectTargetLanguage(for: newText)
         updateTranslationHeader()
+        lightModel?.targetLanguage = targetPopup.titleOfSelectedItem ?? nativeLanguage
         if isReady {
             translateCurrentText()
         }
@@ -714,7 +1340,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
     }
 
     private func translateCurrentText() {
-        guard isReady else { return }
+        guard isReady, !isSwitchingBackend else { return }
         let text = originalTextView.string.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty {
             showAlert(title: tr("warning"), message: tr("emptyOriginal"))
@@ -725,7 +1351,17 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
             lastForeignLanguage = target
         }
         updateTranslationHeader()
-        sendCommand(["action": "translate", "text": text, "target": target, "style": stylePopup.titleOfSelectedItem ?? "Default"])
+        updateBackendDependentControls()
+        lightModel?.sourceText = text
+        lightModel?.targetLanguage = target
+        lightModel?.backendName = backendDisplayName()
+        sendCommand([
+            "action": "translate",
+            "text": text,
+            "target": target,
+            "style": stylePopup.titleOfSelectedItem ?? "Default",
+            "backend": activeWorkerBackend,
+        ])
     }
 
     @objc private func updateAndTranslate(_ sender: Any?) {
@@ -735,6 +1371,49 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
     @objc private func selectionChanged(_ sender: Any?) {
         updateTranslationHeader()
         translateCurrentText()
+    }
+
+    @objc private func backendModeChanged(_ sender: NSSegmentedControl) {
+        guard !isSyncingBackendModeControl else { return }
+        guard !usesLightUI else {
+            syncBackendModeControl()
+            return
+        }
+        switchBackend(to: sender.selectedSegment == 1 ? "cloud" : "gemma")
+    }
+
+    private func switchBackend(to requestedBackend: String) {
+        guard isReady, !isSwitchingBackend else {
+            syncBackendModeControl()
+            return
+        }
+        let normalized = normalizedBackendOverride(requestedBackend) ?? "gemma"
+        let resolvedBackend = normalized == "cloud" ? cloudBackendSetting.lowercased() : normalized
+        guard resolvedBackend != activeWorkerBackend else {
+            syncBackendModeControl()
+            return
+        }
+
+        backendBeforeSwitch = launchBackendOverride
+        launchBackendOverride = normalized
+        isSwitchingBackend = true
+        syncBackendModeControl()
+        setControlsEnabled(false)
+
+        let needsLocalLoad = resolvedBackend == "gemma" && !localBackendReady
+        if needsLocalLoad {
+            backendSwitchProgress.startAnimation(nil)
+            footerProgress.startAnimation(nil)
+            footerStatusLabel.stringValue = tr("loadingLocalModel")
+            setStatus(tr("loadingLocalModel"))
+        } else {
+            backendSwitchProgress.stopAnimation(nil)
+            footerProgress.stopAnimation(nil)
+            footerStatusLabel.stringValue = tr("switchingBackend")
+            setStatus(tr("switchingBackend"))
+        }
+        updateBackendDependentControls(controlsEnabled: false)
+        sendCommand(["action": "prepare_backend", "backend": resolvedBackend])
     }
 
     func textDidChange(_ notification: Notification) {
@@ -835,7 +1514,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         }
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 660, height: 370),
+            contentRect: NSRect(x: 0, y: 0, width: 660, height: 415),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -856,6 +1535,8 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
         settingsGuiPopup = popup(guiLanguageOptions, action: #selector(noop(_:)))
         settingsGuiPopup?.selectItem(withTitle: guiLanguageSetting)
+        settingsCloudBackendPopup = popup(cloudBackendOptions, action: #selector(noop(_:)))
+        settingsCloudBackendPopup?.selectItem(withTitle: cloudBackendSetting)
         settingsNativePopup = popup(languages.map(\.name), action: #selector(noop(_:)))
         settingsNativePopup?.selectItem(withTitle: nativeLanguage)
         settingsForeignPopup = popup(languages.map(\.name), action: #selector(noop(_:)))
@@ -873,6 +1554,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
         let form = NSStackView(views: [
             settingsRow(tr("guiLanguage"), control: settingsGuiPopup!),
+            settingsRow(tr("cloudBackend"), control: settingsCloudBackendPopup!),
             settingsRow(tr("nativeLanguage"), control: settingsNativePopup!),
             settingsRow(tr("primaryForeign"), control: settingsForeignPopup!),
             settingsRow(tr("modelPath"), control: modelRow),
@@ -910,6 +1592,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
             stack.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -44),
             stack.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -34),
             settingsGuiPopup!.widthAnchor.constraint(equalToConstant: 250),
+            settingsCloudBackendPopup!.widthAnchor.constraint(equalToConstant: 250),
             settingsNativePopup!.widthAnchor.constraint(equalToConstant: 250),
             settingsForeignPopup!.widthAnchor.constraint(equalToConstant: 250),
             settingsModelField!.widthAnchor.constraint(equalToConstant: 300),
@@ -936,12 +1619,14 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         UserDefaults.standard.set(settingsNativePopup?.titleOfSelectedItem ?? defaultNativeLanguage, forKey: "nativeLanguage")
         UserDefaults.standard.set(settingsForeignPopup?.titleOfSelectedItem ?? defaultPrimaryForeignLanguage, forKey: "primaryForeignLanguage")
         UserDefaults.standard.set(settingsGuiPopup?.titleOfSelectedItem ?? "Auto", forKey: "guiLanguage")
+        UserDefaults.standard.set(settingsCloudBackendPopup?.titleOfSelectedItem ?? defaultCloudBackend, forKey: "cloudBackend")
         UserDefaults.standard.set(settingsModelField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) ?? defaultModelPath, forKey: "modelPath")
         settingsPanel?.close()
         settingsPanel = nil
         lastForeignLanguage = primaryForeignLanguage
         autoSelectTargetLanguage(for: originalTextView.string)
         updateTranslationHeader()
+        updateBackendDependentControls()
         showAlert(title: tr("settingsSaved"), message: tr("settingsSavedMessage"))
     }
 
@@ -967,10 +1652,13 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
     }
 
     private func setControlsEnabled(_ enabled: Bool) {
-        [targetPopup, stylePopup, expandButton, updateButton, swapButton, stopButton, copyOriginalButton, copyTranslationButton].forEach {
+        [targetPopup, expandButton, updateButton, swapButton, copyOriginalButton, copyTranslationButton].forEach {
             $0?.isEnabled = enabled
         }
+        backendModeControl?.isEnabled = enabled
+        stopButton?.isEnabled = enabled
         originalTextView?.isEditable = enabled
+        updateBackendDependentControls(controlsEnabled: enabled)
     }
 
     private func setStatus(_ text: String) {
@@ -1068,6 +1756,58 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         return languages.contains(where: { $0.name == value }) || key == "modelPath" ? value : fallback
     }
 
+    private func updateBackendDependentControls(controlsEnabled: Bool? = nil) {
+        let enabled = controlsEnabled ?? isReady
+        stylePopup?.isEnabled = enabled && !isUsingCloudBackend
+        backendModeControl?.isEnabled = enabled && !isSwitchingBackend
+        syncBackendModeControl()
+        subtitleLabel?.stringValue = subtitleText()
+        statusLabel?.stringValue = backendDisplayName()
+    }
+
+    private var isUsingCloudBackend: Bool {
+        activeWorkerBackend == "google" || activeWorkerBackend == "bing"
+    }
+
+    private func syncBackendModeControl() {
+        isSyncingBackendModeControl = true
+        backendModeControl?.selectedSegment = isUsingCloudBackend ? 1 : 0
+        isSyncingBackendModeControl = false
+    }
+
+    private func subtitleText() -> String {
+        if usesChineseUI {
+            switch activeWorkerBackend {
+            case "google":
+                return "使用 Google Translate 云端翻译所选文本。"
+            case "bing":
+                return "使用 Bing Translator 云端翻译所选文本。"
+            default:
+                return "使用本地 TranslateGemma 模型翻译所选文本。"
+            }
+        }
+
+        switch activeWorkerBackend {
+        case "google":
+            return "Translate selected text with Google Translate."
+        case "bing":
+            return "Translate selected text with Bing Translator."
+        default:
+            return "Translate selected text with the local TranslateGemma model."
+        }
+    }
+
+    private func backendDisplayName() -> String {
+        switch activeWorkerBackend {
+        case "google":
+            return "Google Translate"
+        case "bing":
+            return "Bing Translator"
+        default:
+            return modelDisplayName()
+        }
+    }
+
     private func modelDisplayName() -> String {
         let name = URL(fileURLWithPath: modelPath).lastPathComponent
         if name.isEmpty {
@@ -1155,9 +1895,6 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         if prominent {
             button.keyEquivalent = "\r"
         }
-        if #available(macOS 26.0, *) {
-            button.bezelStyle = .glass
-        }
         return button
     }
 
@@ -1174,9 +1911,6 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         popup.action = action
         for item in items {
             popup.addItem(withTitle: item)
-        }
-        if #available(macOS 26.0, *) {
-            popup.bezelStyle = .glass
         }
         return popup
     }
@@ -1234,15 +1968,19 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
     }
 }
 
-let launchText = readLaunchText()
+let launchRequest = parseLaunchRequest()
 let instanceLock = SingleInstanceLock()
 if !instanceLock.acquire() {
-    instanceLock.forward(text: launchText)
+    instanceLock.forward(request: launchRequest)
     exit(0)
 }
 
 let app = NSApplication.shared
-let delegate = TranslateTextApp(initialText: launchText, instanceLock: instanceLock)
+if launchRequest.usesLightUI {
+    app.setActivationPolicy(.accessory)
+} else {
+    app.setActivationPolicy(.regular)
+}
+let delegate = TranslateTextApp(launchRequest: launchRequest, instanceLock: instanceLock)
 app.delegate = delegate
-app.setActivationPolicy(.regular)
 app.run()
