@@ -6,7 +6,9 @@
 
 ## 主要特性
 
-![AppKit GUI](Screenshots/AppKit_GUI.png)
+![Light UI](Screenshots/Light_UI.png)
+
+![Full UI](Screenshots/AppKit_GUI.png)
 
 - 原生 AppKit 界面，支持浅色/深色外观。
 - 使用 `mlx-lm` 在本地翻译，也可使用无需 API Key 的 Google 或 Bing 云端翻译。

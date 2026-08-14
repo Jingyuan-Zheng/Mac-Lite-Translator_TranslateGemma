@@ -6,7 +6,9 @@ A native macOS translator with a local **TranslateGemma** MLX backend and option
 
 ## Highlights
 
-![AppKit GUI](Screenshots/AppKit_GUI.png)
+![Light UI](Screenshots/Light_UI.png)
+
+![Full UI](Screenshots/AppKit_GUI.png)
 
 - Native AppKit interface with light/dark appearance support.
 - Local translation through `mlx-lm`, plus optional Google or Bing cloud translation without API keys.

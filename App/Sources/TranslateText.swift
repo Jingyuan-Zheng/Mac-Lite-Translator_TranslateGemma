@@ -856,7 +856,8 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         originalTextView = originalScroll.documentView as? NSTextView
         originalTextView.string = initialText
         originalTextView.delegate = self
-        let originalStack = paddedStack([sectionHeader(tr("originalText")), originalScroll])
+        let originalTextBox = textBox(originalScroll)
+        let originalStack = paddedStack([sectionHeader(tr("originalText")), originalTextBox])
         originalPanel.addSubview(originalStack)
         pin(originalStack, to: originalPanel)
 
@@ -932,7 +933,8 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         translationScroll = textScroll(editable: false)
         translationTextView = translationScroll.documentView as? NSTextView
         translationHeaderLabel = label("", size: 13, weight: .semibold)
-        let translationStack = paddedStack([sectionHeader(translationHeaderLabel), translationScroll])
+        let translationTextBox = textBox(translationScroll)
+        let translationStack = paddedStack([sectionHeader(translationHeaderLabel), translationTextBox])
         translationPanel.addSubview(translationStack)
         pin(translationStack, to: translationPanel)
         updateTranslationHeader()
@@ -969,7 +971,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         mainContent.translatesAutoresizingMaskIntoConstraints = false
         rootView.addSubview(mainContent)
 
-        originalHeightConstraint = originalScroll.heightAnchor.constraint(equalToConstant: 72)
+        originalHeightConstraint = originalTextBox.heightAnchor.constraint(equalToConstant: 72)
 
         NSLayoutConstraint.activate([
             mainContent.topAnchor.constraint(equalTo: rootView.topAnchor),
@@ -994,7 +996,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
             originalHeightConstraint,
             originalScroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 600),
             translationScroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 600),
-            translationScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 240),
+            translationTextBox.heightAnchor.constraint(greaterThanOrEqualToConstant: 240),
             footerProgress.widthAnchor.constraint(equalToConstant: 20),
             footerProgress.heightAnchor.constraint(equalToConstant: 20),
             targetPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 160),
@@ -1888,18 +1890,25 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         return scroll
     }
 
+    private func textBox(_ scroll: NSScrollView) -> NSVisualEffectView {
+        let box = NSVisualEffectView()
+        box.material = .contentBackground
+        box.blendingMode = .withinWindow
+        box.state = .active
+        box.wantsLayer = true
+        box.layer?.cornerRadius = 8
+        box.layer?.masksToBounds = true
+        box.addSubview(scroll)
+        pin(scroll, to: box)
+        return box
+    }
+
     private func bodyTextFont() -> NSFont {
         NSFont.systemFont(ofSize: 16)
     }
 
-    private func panel() -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = .contentBackground
-        view.blendingMode = .withinWindow
-        view.state = .active
-        view.wantsLayer = true
-        view.layer?.cornerRadius = 18
-        return view
+    private func panel() -> NSView {
+        NSView()
     }
 
     private func paddedStack(_ views: [NSView]) -> NSStackView {
