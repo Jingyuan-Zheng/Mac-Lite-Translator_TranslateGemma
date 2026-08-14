@@ -368,7 +368,7 @@ final class LightTranslationPanel: NSPanel, NSWindowDelegate {
     init() {
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 480, height: 320),
-            styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -376,8 +376,6 @@ final class LightTranslationPanel: NSPanel, NSWindowDelegate {
         isFloatingPanel = true
         level = .floating
         collectionBehavior = [.canJoinAllSpaces, .transient]
-        titleVisibility = .hidden
-        titlebarAppearsTransparent = true
         isMovableByWindowBackground = true
         animationBehavior = .utilityWindow
         standardWindowButton(.closeButton)?.isHidden = true
