@@ -63,7 +63,7 @@ def main() -> None:
         "CFBundleDisplayName": "Translate Text",
         "CFBundlePackageType": "APPL",
         "CFBundleShortVersionString": "2.1",
-        "CFBundleVersion": "12",
+        "CFBundleVersion": "13",
         "LSMinimumSystemVersion": "14.0",
         "LSUIElement": True,
         "NSHighResolutionCapable": True,

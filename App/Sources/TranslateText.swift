@@ -577,6 +577,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
     private func showLightUI() {
         usesLightUI = true
         window.orderOut(nil)
+        NSApp.setActivationPolicy(.accessory)
 
         if let model = lightModel, let panel = lightPanel {
             model.sourceText = originalTextView.string
@@ -619,44 +620,12 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
     }
 
     private func showFullUI() {
-        var arguments = ["--backend", activeWorkerBackend]
-        let target = targetPopup.titleOfSelectedItem ?? nativeLanguage
-        arguments += ["--restore-target", target]
-        let translation = translationTextView.string
-        if !translation.isEmpty, translation != tr("translating") + "..." {
-            arguments += ["--restore-translation-base64", Data(translation.utf8).base64EncodedString()]
-        }
-        arguments += ["--", originalTextView.string]
-        relaunch(arguments: arguments, activates: true)
-    }
-
-    private func relaunch(arguments: [String], activates: Bool) {
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.arguments = arguments
-        configuration.activates = activates
-        configuration.createsNewApplicationInstance = true
-
-        if activates {
-            NSApp.activate()
-        }
-        let sourceApplication = NSRunningApplication.current
-        instanceLock.release()
-        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { [weak self] application, error in
-            DispatchQueue.main.async {
-                if let error {
-                    _ = self?.instanceLock.acquire()
-                    self?.showAlert(title: "Could Not Switch UI", message: error.localizedDescription)
-                    return
-                }
-                if activates, let application {
-                    NSApp.yieldActivation(to: application)
-                    _ = application.activate(from: sourceApplication, options: [.activateAllWindows])
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    NSApp.terminate(nil)
-                }
-            }
-        }
+        usesLightUI = false
+        lightPanel?.orderOut(nil)
+        NSApp.setActivationPolicy(.regular)
+        buildMenu()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func tr(_ key: String) -> String {
@@ -1290,24 +1259,12 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         guard let text = notification.userInfo?["text"] as? String else { return }
         let requestedBackend = normalizedBackendOverride(notification.userInfo?["backend"] as? String)
         let requestsLightUI = notification.userInfo?["ui"] as? String == "light"
-        if requestsLightUI, !usesLightUI {
-            var arguments = ["--light"]
-            if let requestedBackend {
-                arguments += ["--backend", requestedBackend]
-            }
-            arguments += ["--", text]
-            relaunch(arguments: arguments, activates: false)
-            return
-        }
-
         launchBackendOverride = requestedBackend
         replaceOriginalText(text)
         if requestsLightUI {
             showLightUI()
         } else if usesLightUI {
-            lightModel?.sourceText = text
-            lightModel?.backendName = backendDisplayName()
-            lightPanel?.presentNearCursor()
+            showFullUI()
         } else if let window {
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
