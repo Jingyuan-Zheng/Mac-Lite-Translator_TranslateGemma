@@ -364,6 +364,7 @@ struct LightVisualEffectBackground: NSViewRepresentable {
 
 final class LightTranslationPanel: NSPanel, NSWindowDelegate {
     var onClose: (() -> Void)?
+    var onResignKey: (() -> Void)?
 
     init() {
         super.init(
@@ -418,6 +419,7 @@ final class LightTranslationPanel: NSPanel, NSWindowDelegate {
     override var canBecomeMain: Bool { false }
 
     func windowWillClose(_ notification: Notification) { onClose?() }
+    func windowDidResignKey(_ notification: Notification) { onResignKey?() }
     override func cancelOperation(_ sender: Any?) { close() }
 
     override func keyDown(with event: NSEvent) {
@@ -582,6 +584,11 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
             model.targetLanguage = targetPopup.titleOfSelectedItem ?? nativeLanguage
             model.backendName = backendDisplayName()
             model.translatedText = translationTextView.string == tr("translating") + "..." ? "" : translationTextView.string
+            panel.hidesOnDeactivate = false
+            panel.onResignKey = { [weak self, weak panel] in
+                guard let self, self.usesLightUI, self.lightPanel === panel, self.isUsingCloudBackend else { return }
+                NSApp.terminate(nil)
+            }
             panel.presentNearCursor()
             return
         }
@@ -602,6 +609,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         }
 
         let panel = LightTranslationPanel()
+        panel.hidesOnDeactivate = false
         let view = LightTranslationView(model: model) { [weak panel] size in
             panel?.updateContentSize(size)
         }
@@ -610,6 +618,10 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         panel.setContentSize(hostingView.fittingSize)
         panel.onClose = { [weak self, weak panel] in
             guard let self, self.usesLightUI, self.lightPanel === panel else { return }
+            NSApp.terminate(nil)
+        }
+        panel.onResignKey = { [weak self, weak panel] in
+            guard let self, self.usesLightUI, self.lightPanel === panel, self.isUsingCloudBackend else { return }
             NSApp.terminate(nil)
         }
         lightModel = model
