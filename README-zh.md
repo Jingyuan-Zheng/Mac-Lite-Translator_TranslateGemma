@@ -2,14 +2,16 @@
 
 [English](README.md)
 
-这是一个面向本地 **TranslateGemma** MLX 模型的原生 macOS 翻译 App。它适合配合 macOS 快捷指令使用，从任意 App 选中文字后快速翻译，并且保证模型在内存中只加载一次。
+这是一个支持本地 **TranslateGemma** MLX 模型和可选 Google/Bing 云端翻译的原生 macOS App。它适合配合 macOS 快捷指令使用，并在一个 App 进程内管理后端实例。
 
 ## 主要特性
 
 ![AppKit GUI](Screenshots/AppKit_GUI.png)
 
 - 原生 AppKit 界面，支持浅色/深色外观。
-- 使用 `mlx-lm` 在本地翻译；模型下载后无需 API Key、无需联网请求。
+- 使用 `mlx-lm` 在本地翻译，也可使用无需 API Key 的 Google 或 Bing 云端翻译。
+- Full UI 可在本地/云端之间切换；本地模型加载后会驻留到 App 退出。
+- `--light` 可打开不显示 Dock 图标的轻量动画浮窗，并可切换到 Full UI。
 - 适配 macOS 快捷指令，可通过服务菜单或键盘快捷键发送选中文本。
 - 单实例运行：重复调用快捷指令会复用已经打开的窗口和后端，不会再次加载一份模型。
 - 自动检测原文语言，并自动切换目标语言。
@@ -19,7 +21,7 @@
 ## 系统要求
 
 - Apple Silicon Mac。
-- macOS 13 或更高版本。
+- macOS 14 或更高版本。
 - Python 3.10+，并安装 `mlx-lm`。
 - 本地 TranslateGemma MLX 模型文件夹，例如 `translategemma-12b-it-4bit`。
 - 12B 4-bit 模型建议使用 16GB 或更高统一内存。
@@ -57,7 +59,7 @@ cp -R "outputs/Translate Text.app" /Applications/
 1. 打开 `Translate Text.app`。
 2. 从菜单栏打开 `Settings...` / `设置`。
 3. 选择你的本地 TranslateGemma 模型文件夹。
-4. 可选：设置母语、主要外语和 GUI 语言。
+4. 可选：设置云端提供商、母语、主要外语和 GUI 语言。
 
 本仓库不会写入任何个人默认模型路径。首次使用时必须在设置里选择模型文件夹。
 
@@ -84,6 +86,21 @@ export TRANSLATE_TEXT_PYTHON="/path/to/your/python"
 
 ```bash
 'outputs/Translate Text.app/Contents/MacOS/Translate Text' "Hello world"
+```
+
+常用启动参数：
+
+```bash
+# 使用设置中的云端提供商启动
+'outputs/Translate Text.app/Contents/MacOS/Translate Text' --cloud "Hello world"
+
+# 使用轻量浮窗启动
+'outputs/Translate Text.app/Contents/MacOS/Translate Text' --light "Hello world"
+
+# 指定后端
+'outputs/Translate Text.app/Contents/MacOS/Translate Text' --backend google "Hello world"
+'outputs/Translate Text.app/Contents/MacOS/Translate Text' --backend bing "Hello world"
+'outputs/Translate Text.app/Contents/MacOS/Translate Text' --backend gemma "Hello world"
 ```
 
 ## 支持语言
@@ -114,6 +131,7 @@ App/
   Sources/TranslateText.swift       原生 macOS App
   Workers/translate_text_worker.py  MLX 翻译后端
   build_app.py                      App 打包脚本
+  TRANSLATEKIT_LICENSE.txt          Light UI 使用的 TranslateKit 许可说明
 assets/
   translator.icns
 legacy/tk/
@@ -137,7 +155,7 @@ Screenshots/
 
 **需要多少内存？**
 
-如果使用 `translategemma-12b-it-4bit`，建议 16GB 或更高统一内存。模型会占用数 GB 内存。App 已加入单实例锁，重复快捷指令调用会复用同一个已加载模型，不会反复加载多份模型。
+如果使用 `translategemma-12b-it-4bit`，建议 16GB 或更高统一内存。模型会占用数 GB 内存。App 使用单实例锁和单一后端进程，重复快捷指令调用以及切换云端后都会复用驻留的本地模型，不会反复加载多份模型。
 
 **支持图片或多模态翻译吗？**
 

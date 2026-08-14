@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 APP_ROOT = ROOT / "App"
 SOURCE = APP_ROOT / "Sources" / "TranslateText.swift"
 WORKER = APP_ROOT / "Workers" / "translate_text_worker.py"
+TRANSLATEKIT_LICENSE = APP_ROOT / "TRANSLATEKIT_LICENSE.txt"
 BUILD_DIR = APP_ROOT / "build"
 OUTPUTS = ROOT / "outputs"
 APP_BUNDLE = OUTPUTS / "Translate Text.app"
@@ -49,6 +50,7 @@ def main() -> None:
 
     shutil.copy2(binary, macos_dir / EXECUTABLE_NAME)
     shutil.copy2(WORKER, resources_dir / "translate_text_worker.py")
+    shutil.copy2(TRANSLATEKIT_LICENSE, resources_dir / "TRANSLATEKIT_LICENSE.txt")
     if ICON_SOURCE.exists():
         shutil.copy2(ICON_SOURCE, resources_dir / "translator.icns")
 
@@ -60,9 +62,10 @@ def main() -> None:
         "CFBundleName": "Translate Text",
         "CFBundleDisplayName": "Translate Text",
         "CFBundlePackageType": "APPL",
-        "CFBundleShortVersionString": "2.0",
-        "CFBundleVersion": "2",
-        "LSMinimumSystemVersion": "13.0",
+        "CFBundleShortVersionString": "2.1",
+        "CFBundleVersion": "12",
+        "LSMinimumSystemVersion": "14.0",
+        "LSUIElement": True,
         "NSHighResolutionCapable": True,
         "NSPrincipalClass": "NSApplication",
     }
