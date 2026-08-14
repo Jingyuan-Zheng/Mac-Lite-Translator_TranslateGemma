@@ -364,7 +364,11 @@ struct LightVisualEffectBackground: NSViewRepresentable {
 
 final class LightTranslationPanel: NSPanel, NSWindowDelegate {
     var onClose: (() -> Void)?
-    var onResignKey: (() -> Void)?
+    var onOutsideClick: (() -> Void)?
+    private var menuTrackingTokens: [NSObjectProtocol] = []
+    private var isMenuTracking = false
+    private var localMouseMonitor: Any?
+    private var globalMouseMonitor: Any?
 
     init() {
         super.init(
@@ -374,6 +378,30 @@ final class LightTranslationPanel: NSPanel, NSWindowDelegate {
             defer: false
         )
         delegate = self
+        menuTrackingTokens = [
+            NotificationCenter.default.addObserver(
+                forName: NSMenu.didBeginTrackingNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.isMenuTracking = true
+            },
+            NotificationCenter.default.addObserver(
+                forName: NSMenu.didEndTrackingNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.isMenuTracking = false
+            },
+        ]
+        let clickMask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: clickMask) { [weak self] event in
+            self?.handleLocalMouseDown(event)
+            return event
+        }
+        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: clickMask) { [weak self] _ in
+            self?.handleGlobalMouseDown()
+        }
         isFloatingPanel = true
         level = .floating
         collectionBehavior = [.canJoinAllSpaces, .transient]
@@ -418,8 +446,30 @@ final class LightTranslationPanel: NSPanel, NSWindowDelegate {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
+    deinit {
+        menuTrackingTokens.forEach(NotificationCenter.default.removeObserver)
+        if let localMouseMonitor { NSEvent.removeMonitor(localMouseMonitor) }
+        if let globalMouseMonitor { NSEvent.removeMonitor(globalMouseMonitor) }
+    }
+
     func windowWillClose(_ notification: Notification) { onClose?() }
-    func windowDidResignKey(_ notification: Notification) { onResignKey?() }
+
+    private func handleLocalMouseDown(_ event: NSEvent) {
+        guard isVisible, !isMenuTracking, event.window !== self else { return }
+        requestOutsideClick()
+    }
+
+    private func handleGlobalMouseDown() {
+        guard isVisible, !frame.contains(NSEvent.mouseLocation) else { return }
+        requestOutsideClick()
+    }
+
+    private func requestOutsideClick() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isVisible, !self.isMenuTracking else { return }
+            self.onOutsideClick?()
+        }
+    }
     override func cancelOperation(_ sender: Any?) { close() }
 
     override func keyDown(with event: NSEvent) {
@@ -565,7 +615,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        !usesLightUI
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -585,7 +635,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
             model.backendName = backendDisplayName()
             model.translatedText = translationTextView.string == tr("translating") + "..." ? "" : translationTextView.string
             panel.hidesOnDeactivate = false
-            panel.onResignKey = { [weak self, weak panel] in
+            panel.onOutsideClick = { [weak self, weak panel] in
                 guard let self, self.usesLightUI, self.lightPanel === panel, self.isUsingCloudBackend else { return }
                 NSApp.terminate(nil)
             }
@@ -620,7 +670,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
             guard let self, self.usesLightUI, self.lightPanel === panel else { return }
             NSApp.terminate(nil)
         }
-        panel.onResignKey = { [weak self, weak panel] in
+        panel.onOutsideClick = { [weak self, weak panel] in
             guard let self, self.usesLightUI, self.lightPanel === panel, self.isUsingCloudBackend else { return }
             NSApp.terminate(nil)
         }
