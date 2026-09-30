@@ -2,7 +2,7 @@
 
 [简体中文](README-zh.md)
 
-A native macOS translator with a local **TranslateGemma** MLX backend and optional Google/Bing cloud translation. It is designed for quick translation from any app through macOS Shortcuts while keeping backend instances under one app process.
+A native macOS translator with three selectable backends: **OS** (Apple’s system Translation framework), **LLM** (a local TranslateGemma MLX model), and **Cloud** (Google, Bing, and DeepL fallback services). It is designed for quick translation from any app through macOS Shortcuts while keeping backend instances under one app process.
 
 ## Highlights
 
@@ -11,19 +11,22 @@ A native macOS translator with a local **TranslateGemma** MLX backend and option
 ![Full UI](Screenshots/AppKit_GUI.png)
 
 - Native AppKit interface with light/dark appearance support.
-- Local translation through `mlx-lm`, plus optional Google or Bing cloud translation without API keys.
-- Runtime Local/Cloud switching in the full UI. Once loaded, the local model remains resident until the app exits.
+- Three modes in the full UI: OS system translation, local LLM translation through `mlx-lm`, and cloud translation.
+- OS mode uses Apple’s Translation framework and downloaded system language packs; cloud-mode failure falls back to OS translation when available.
+- Google, Bing, and DeepL cloud fallbacks, with configurable service order and no API key required.
+- Runtime OS/LLM/Cloud switching. Once loaded, the local LLM remains resident until the app exits.
 - `--light` opens a compact animated floating UI without a Dock icon; it can switch to the full UI.
 - macOS Shortcuts friendly: selected text can be sent from the Services menu or a keyboard shortcut.
 - Single-instance runtime: repeated Shortcut calls reuse the existing app window and backend instead of loading another model copy.
 - Auto target-language switching and source-language detection.
 - Translation styles: Default, Academic, Web Chat, Casual, and Dictionary.
 - English and Simplified Chinese GUI, with Auto mode based on the system language.
+- Settings include a default startup mode, and the native About panel includes localized credits and project links.
 
 ## Requirements
 
 - Apple Silicon Mac.
-- macOS 14 or later.
+- macOS 15 or later for the OS translation mode. LLM and cloud modes still require Apple Silicon for the maintained app build.
 - Python 3.10+ with `mlx-lm`.
 - A local TranslateGemma MLX model folder, for example `translategemma-12b-it-4bit`.
 - 16GB unified memory is recommended for the 12B 4-bit model.
@@ -61,7 +64,7 @@ cp -R "outputs/Translate Text.app" /Applications/
 1. Open `Translate Text.app`.
 2. Choose `Settings...` from the app menu.
 3. Select your local TranslateGemma model folder.
-4. Optionally set the cloud provider, native language, primary foreign language, and GUI language.
+4. Optionally set the default startup mode (OS, LLM, Cloud, or a specific cloud service), cloud provider order, native language, primary foreign language, and GUI language.
 
 The repository does not ship with a personal default model path. You must choose the model folder on first use.
 
@@ -96,14 +99,26 @@ Useful launch options:
 # Start with the configured cloud provider
 'outputs/Translate Text.app/Contents/MacOS/Translate Text' --cloud "Hello world"
 
+# Force macOS system translation or the local LLM
+'outputs/Translate Text.app/Contents/MacOS/Translate Text' --os "Hello world"
+'outputs/Translate Text.app/Contents/MacOS/Translate Text' --llm "Hello world"
+
 # Start with the compact floating UI
 'outputs/Translate Text.app/Contents/MacOS/Translate Text' --light "Hello world"
 
 # Select a specific backend
 'outputs/Translate Text.app/Contents/MacOS/Translate Text' --backend google "Hello world"
 'outputs/Translate Text.app/Contents/MacOS/Translate Text' --backend bing "Hello world"
-'outputs/Translate Text.app/Contents/MacOS/Translate Text' --backend gemma "Hello world"
+'outputs/Translate Text.app/Contents/MacOS/Translate Text' --backend llm "Hello world"
 ```
+
+The same flags work with Finder/Shortcuts launches, for example:
+
+```bash
+/usr/bin/open -n '/Applications/Translate Text.app' --args --light --llm "$1"
+```
+
+When no backend flag is provided, the app uses the default startup mode selected in Settings. If an instance is already running, a new request switches its active backend before translating.
 
 ## Supported Languages
 
@@ -154,6 +169,10 @@ Download a TranslateGemma MLX model from Hugging Face or your preferred model ma
 **Why does the app require selecting a model path?**
 
 Model folders are large and machine-specific. The open-source version intentionally ships without any personal default path. The path is stored locally in macOS UserDefaults after you choose it.
+
+**Is OS mode fully offline?**
+
+After the required Apple Translation language packs are downloaded, translations run through the system framework on the device. The first use of a language pair can require a system-managed download and permission prompt. Manage downloaded packs in **System Settings → General → Language & Region → Translation Languages**.
 
 **How much memory do I need?**
 

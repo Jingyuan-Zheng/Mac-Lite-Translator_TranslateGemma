@@ -7,5 +7,6 @@ __pycache__/
 outputs/
 App/build/
 *.app/
+*.dmg
 *.swiftmodule
 *.swiftdoc

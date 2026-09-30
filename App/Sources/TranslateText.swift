@@ -2,19 +2,204 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 import Darwin
+import Combine
+import Translation
+import NaturalLanguage
 
 struct Language {
     let name: String
     let code: String
 }
 
+final class SettingsDraft: ObservableObject {
+    @Published var defaultBackend: String
+    @Published var guiLanguage: String
+    @Published var nativeLanguage: String
+    @Published var primaryForeignLanguage: String
+    @Published var modelPath: String
+    @Published var cloudServiceOrder: [String]
+    @Published var googleFallbackOrder: [String]
+    let guiLanguageOptions: [String]
+    let backendOptions: [(title: String, value: String)]
+    let languageOptions: [String]
+    var onBrowseModel: (() -> Void)?
+    var onSave: ((SettingsDraft) -> Void)?
+    var onCancel: (() -> Void)?
+
+    init(
+        defaultBackend: String,
+        guiLanguage: String,
+        nativeLanguage: String,
+        primaryForeignLanguage: String,
+        modelPath: String,
+        cloudServiceOrder: [String],
+        googleFallbackOrder: [String],
+        guiLanguageOptions: [String],
+        backendOptions: [(title: String, value: String)],
+        languageOptions: [String]
+    ) {
+        self.defaultBackend = defaultBackend
+        self.guiLanguage = guiLanguage
+        self.nativeLanguage = nativeLanguage
+        self.primaryForeignLanguage = primaryForeignLanguage
+        self.modelPath = modelPath
+        self.cloudServiceOrder = cloudServiceOrder
+        self.googleFallbackOrder = googleFallbackOrder
+        self.guiLanguageOptions = guiLanguageOptions
+        self.backendOptions = backendOptions
+        self.languageOptions = languageOptions
+    }
+}
+
+struct SettingsPriorityList: View {
+    let title: String
+    let help: String
+    @Binding var items: [String]
+    @State private var selection: String?
+
+    var body: some View {
+        GroupBox {
+            List(selection: $selection) {
+                ForEach(items, id: \.self) { item in
+                    HStack(spacing: 8) {
+                        Image(systemName: "line.3.horizontal")
+                            .foregroundStyle(.tertiary)
+                        Text(item)
+                        Spacer()
+                        if item == items.first {
+                            Text("Primary")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .tag(item)
+                    .accessibilityLabel("\(item), fallback priority \((items.firstIndex(of: item) ?? 0) + 1)")
+                }
+                .onMove { source, destination in
+                    items.move(fromOffsets: source, toOffset: destination)
+                }
+            }
+            .listStyle(.inset)
+            .frame(height: 104)
+        } label: {
+            Label(title, systemImage: "arrow.up.arrow.down")
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityHint(help)
+    }
+}
+
+struct TranslateTextSettingsView: View {
+    @ObservedObject var draft: SettingsDraft
+    // Grouped Form cards sit 22pt inside this view's content edge on macOS.
+    private let formCardGuideInset: CGFloat = 22
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Settings")
+                    .font(.title.bold())
+                Text("Choose language defaults, cloud translation priority, and the LLM model.")
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 2)
+            }
+            .padding(.horizontal, formCardGuideInset)
+
+            Form {
+                Section("Interface") {
+                    Picker("Interface language", selection: $draft.guiLanguage) {
+                        ForEach(draft.guiLanguageOptions, id: \.self, content: Text.init)
+                    }
+                }
+
+                Section("Default translation") {
+                    Picker("Launch with", selection: $draft.defaultBackend) {
+                        ForEach(draft.backendOptions, id: \.value) { backend in
+                            Text(backend.title).tag(backend.value)
+                        }
+                    }
+                }
+
+                Section("Cloud translation") {
+                    SettingsPriorityList(
+                        title: "Cloud service fallback priority",
+                        help: "Drag a service row to change its fallback priority.",
+                        items: $draft.cloudServiceOrder
+                    )
+                    SettingsPriorityList(
+                        title: "Google endpoint fallback priority",
+                        help: "Drag an endpoint row to change its fallback priority.",
+                        items: $draft.googleFallbackOrder
+                    )
+                }
+
+                Section("Language defaults") {
+                    Picker("Native language", selection: $draft.nativeLanguage) {
+                        ForEach(draft.languageOptions, id: \.self, content: Text.init)
+                    }
+                    Picker("Primary foreign language", selection: $draft.primaryForeignLanguage) {
+                        ForEach(draft.languageOptions, id: \.self, content: Text.init)
+                    }
+                }
+
+                Section("LLM model") {
+                    HStack {
+                        TextField("Model folder", text: $draft.modelPath)
+                        Button("Browse…", systemImage: "folder") {
+                            draft.onBrowseModel?()
+                        }
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            .padding(.top, 18)
+
+            HStack {
+                Spacer()
+                Button("Cancel") { draft.onCancel?() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") { draft.onSave?(draft) }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(.top, 18)
+            .padding(.horizontal, formCardGuideInset)
+        }
+        .padding(24)
+        .frame(minWidth: 680, minHeight: 650)
+    }
+}
+
 let singleInstanceNotificationName = Notification.Name("local.shortcut-translate-text.open-request")
 let defaultNativeLanguage = "简体中文"
 let defaultPrimaryForeignLanguage = "English"
-let defaultModelPath = ""
+let defaultModelPath = "/Users/jingyuan/.lmstudio/models/mlx-community/translategemma-12b-it-4bit"
 let defaultCloudBackend = "Google"
+let defaultBackend = "gemma"
+let backendOptions = [
+    (title: "OS", value: "apple"),
+    (title: "LLM", value: "gemma"),
+    (title: "Cloud", value: "cloud"),
+    (title: "Google", value: "google"),
+    (title: "Bing", value: "bing"),
+    (title: "DeepL", value: "deepl"),
+]
+let textPanelHorizontalInset: CGFloat = 18
 let guiLanguageOptions = ["Auto", "English", "简体中文"]
-let cloudBackendOptions = ["Google", "Bing"]
+let cloudServiceOrderOptions = [
+    "Google → Bing → DeepL",
+    "Google → DeepL → Bing",
+    "Bing → Google → DeepL",
+    "Bing → DeepL → Google",
+    "DeepL → Google → Bing",
+    "DeepL → Bing → Google",
+]
+let googleFallbackOrderOptions = [
+    "GTX → Web RPC → Mobile",
+    "Web RPC → GTX → Mobile",
+    "Mobile → Web RPC → GTX",
+    "GTX → Mobile → Web RPC",
+    "Web RPC → Mobile → GTX",
+    "Mobile → GTX → Web RPC",
+]
 let languages: [Language] = [
     Language(name: "简体中文", code: "zh"),
     Language(name: "繁體中文", code: "zh-Hant"),
@@ -41,12 +226,85 @@ struct LaunchRequest {
     let restoredTranslation: String?
 }
 
+@available(macOS 15.0, *)
+private struct AppleTranslationRequest: Identifiable {
+    let id = UUID()
+    let text: String
+    let targetLanguage: Locale.Language
+    let sourceLanguage: Locale.Language?
+}
+
+/// Hosts Apple's translation task inside the AppKit interface.  The system task
+/// can identify the source language and requests downloaded language packs when
+/// they are missing, which the direct `installedSource` initializer cannot do.
+@available(macOS 15.0, *)
+private final class AppleTranslationCoordinator: ObservableObject {
+    @Published var configuration: TranslationSession.Configuration?
+    @Published var lightHostIsActive = false
+    fileprivate var request: AppleTranslationRequest?
+    private var configuredSourceLanguageCode: String?
+    private var configuredTargetLanguageCode: String?
+    var onCompletion: ((UUID, Result<String, Error>) -> Void)?
+
+    func translate(text: String, sourceLanguageCode: String?, targetLanguageCode: String) {
+        let request = AppleTranslationRequest(
+            text: text,
+            targetLanguage: Locale.Language(identifier: targetLanguageCode),
+            sourceLanguage: sourceLanguageCode.map(Locale.Language.init(identifier:))
+        )
+        self.request = request
+
+        // `translationTask` treats an equal configuration as already handled.
+        // Explicitly invalidating it makes a second press of Update & Translate
+        // run again when the source/target language pair has not changed.
+        if configuredSourceLanguageCode == sourceLanguageCode,
+           configuredTargetLanguageCode == targetLanguageCode {
+            self.configuration?.invalidate()
+        } else {
+            self.configuration?.invalidate()
+            self.configuration = TranslationSession.Configuration(source: request.sourceLanguage, target: request.targetLanguage)
+            configuredSourceLanguageCode = sourceLanguageCode
+            configuredTargetLanguageCode = targetLanguageCode
+        }
+    }
+
+    func complete(requestID: UUID, result: Result<String, Error>) {
+        guard request?.id == requestID else { return }
+        onCompletion?(requestID, result)
+    }
+}
+
+@available(macOS 15.0, *)
+private struct AppleTranslationBridge: View {
+    @ObservedObject var coordinator: AppleTranslationCoordinator
+    let isLightHost: Bool
+
+    var body: some View {
+        Color.clear
+            .frame(width: 1, height: 1)
+            .translationTask(coordinator.lightHostIsActive == isLightHost ? coordinator.configuration : nil) { session in
+                guard let request = coordinator.request else { return }
+                do {
+                    try await session.prepareTranslation()
+                    let response = try await session.translate(request.text)
+                    coordinator.complete(requestID: request.id, result: .success(response.targetText))
+                } catch {
+                    coordinator.complete(requestID: request.id, result: .failure(error))
+                }
+            }
+    }
+}
+
 func normalizedBackendOverride(_ value: String?) -> String? {
     guard let value else { return nil }
     let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     switch normalized {
-    case "cloud", "google", "bing", "gemma", "local":
-        return normalized == "local" ? "gemma" : normalized
+    case "apple", "os", "cloud", "google", "bing", "deepl", "gemma", "local", "llm":
+        switch normalized {
+        case "local", "llm": return "gemma"
+        case "os": return "apple"
+        default: return normalized
+        }
     default:
         return nil
     }
@@ -69,6 +327,8 @@ func parseLaunchRequest() -> LaunchRequest {
             break
         } else if arg == "--cloud" {
             backendOverride = "cloud"
+        } else if arg == "--os" || arg == "--apple" {
+            backendOverride = "apple"
         } else if arg == "--light" {
             usesLightUI = true
         } else if arg == "--restore-target" {
@@ -89,7 +349,7 @@ func parseLaunchRequest() -> LaunchRequest {
             backendOverride = "google"
         } else if arg == "--bing" {
             backendOverride = "bing"
-        } else if arg == "--gemma" || arg == "--local" {
+        } else if arg == "--gemma" || arg == "--local" || arg == "--llm" {
             backendOverride = "gemma"
         } else if arg == "--backend" || arg == "--engine" {
             let nextIndex = args.index(after: index)
@@ -138,7 +398,7 @@ final class SingleInstanceLock {
     func forward(request: LaunchRequest) {
         let userInfo: [String: String] = [
             "text": request.text,
-            "backend": request.backendOverride ?? "gemma",
+            "backend": request.backendOverride ?? "",
             "ui": request.usesLightUI ? "light" : "full",
         ]
         DistributedNotificationCenter.default().postNotificationName(
@@ -183,28 +443,28 @@ final class LightTranslationModel: ObservableObject {
     }
 }
 
-struct LightTranslationView: View {
+private struct LightTranslationView: View {
     @ObservedObject var model: LightTranslationModel
-    var onSizeChange: ((CGSize) -> Void)?
+    let appleTranslationCoordinator: AppleTranslationCoordinator?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            Divider().padding(.horizontal, 12)
-            content
-            Divider().padding(.horizontal, 12)
-            footer
+        ZStack(alignment: .bottomLeading) {
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                Divider().padding(.horizontal, 12)
+                content
+                Divider().padding(.horizontal, 12)
+                footer
+            }
+            if let appleTranslationCoordinator {
+                AppleTranslationBridge(
+                    coordinator: appleTranslationCoordinator,
+                    isLightHost: true
+                )
+            }
         }
         .background(LightVisualEffectBackground())
         .frame(width: 480)
-        .background(
-            GeometryReader { proxy in
-                Color.clear.preference(key: LightViewSizeKey.self, value: proxy.size)
-            }
-        )
-        .onPreferenceChange(LightViewSizeKey.self) { size in
-            onSizeChange?(size)
-        }
     }
 
     private var header: some View {
@@ -312,7 +572,7 @@ struct LightTranslationView: View {
 
     private var footer: some View {
         HStack {
-            Label(model.backendName, systemImage: model.backendName.contains("Gemma") ? "cpu" : "cloud")
+            Label(model.backendName, systemImage: backendSymbolName)
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
 
@@ -339,12 +599,10 @@ struct LightTranslationView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
     }
-}
 
-struct LightViewSizeKey: PreferenceKey {
-    static var defaultValue: CGSize = .zero
-    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
-        value = nextValue()
+    private var backendSymbolName: String {
+        if model.backendName.hasPrefix("OS") { return "apple.logo" }
+        return model.backendName.contains("Gemma") ? "cpu" : "cloud"
     }
 }
 
@@ -431,16 +689,28 @@ final class LightTranslationPanel: NSPanel, NSWindowDelegate {
         makeKey()
     }
 
-    func updateContentSize(_ size: CGSize) {
-        guard size.width > 0, size.height > 0, size != frame.size else { return }
-        let topLeft = NSPoint(x: frame.minX, y: frame.maxY)
-        setContentSize(size)
-        setFrameTopLeftPoint(topLeft)
-        guard let screenFrame = screen?.visibleFrame ?? NSScreen.main?.visibleFrame else { return }
-        var origin = frame.origin
-        origin.x = max(screenFrame.minX + 8, min(origin.x, screenFrame.maxX - frame.width - 8))
-        origin.y = max(screenFrame.minY + 8, min(origin.y, screenFrame.maxY - frame.height - 8))
-        if origin != frame.origin { setFrameOrigin(origin) }
+    override func setFrame(_ frameRect: NSRect, display flag: Bool) {
+        // NSHostingView resizes the panel itself. Apply anchoring to that actual
+        // frame change instead of depending on SwiftUI size preference callbacks.
+        guard isVisible, frameRect.size != frame.size,
+              let screenFrame = screen?.visibleFrame ?? NSScreen.main?.visibleFrame else {
+            super.setFrame(frameRect, display: flag)
+            return
+        }
+
+        let safeFrame = screenFrame.insetBy(dx: 8, dy: 8)
+        var adjustedFrame = frameRect
+        let topAnchoredY = frame.maxY - frameRect.height
+        if frameRect.height > frame.height && topAnchoredY < safeFrame.minY {
+            // Downward growth would cross the screen/Dock boundary: grow upward
+            // from the existing bottom edge instead.
+            adjustedFrame.origin.y = frame.minY
+        } else {
+            adjustedFrame.origin.y = topAnchoredY
+        }
+        adjustedFrame.origin.x = max(safeFrame.minX, min(adjustedFrame.minX, safeFrame.maxX - adjustedFrame.width))
+        adjustedFrame.origin.y = max(safeFrame.minY, min(adjustedFrame.minY, safeFrame.maxY - adjustedFrame.height))
+        super.setFrame(adjustedFrame, display: flag)
     }
 
     override var canBecomeKey: Bool { true }
@@ -496,7 +766,6 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
     private var targetPopup: NSPopUpButton!
     private var stylePopup: NSPopUpButton!
     private var backendModeControl: NSSegmentedControl!
-    private var backendSwitchProgress: NSProgressIndicator!
     private var expandButton: NSButton!
     private var updateButton: NSButton!
     private var swapButton: NSButton!
@@ -505,19 +774,17 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
     private var copyTranslationButton: NSButton!
     private var originalHeightConstraint: NSLayoutConstraint!
     private var settingsPanel: NSPanel?
-    private var settingsNativePopup: NSPopUpButton?
-    private var settingsForeignPopup: NSPopUpButton?
-    private var settingsGuiPopup: NSPopUpButton?
-    private var settingsCloudBackendPopup: NSPopUpButton?
-    private var settingsModelField: NSTextField?
     private let instanceLock: SingleInstanceLock
     private var lightPanel: LightTranslationPanel?
     private var lightModel: LightTranslationModel?
+    private var appleTranslationCoordinator: AppleTranslationCoordinator?
+    private var appleTranslationHostingView: NSHostingView<AppleTranslationBridge>?
 
     private var worker: Process?
     private var workerInput: Pipe?
     private var isReady = false
     private var isSwitchingBackend = false
+    private var isUsingSystemFallback = false
     private var isSyncingBackendModeControl = false
     private var localBackendReady = false
     private var backendBeforeSwitch: String?
@@ -544,9 +811,40 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         settingString("modelPath", fallback: defaultModelPath)
     }
 
+    private var defaultBackendSetting: String {
+        let stored = UserDefaults.standard.string(forKey: "defaultBackend")
+        return backendOptions.contains(where: { $0.value == stored }) ? stored! : defaultBackend
+    }
+
     private var cloudBackendSetting: String {
-        let value = UserDefaults.standard.string(forKey: "cloudBackend") ?? defaultCloudBackend
-        return cloudBackendOptions.contains(value) ? value : defaultCloudBackend
+        if cloudServiceOrderSetting.hasPrefix("Bing") { return "Bing" }
+        if cloudServiceOrderSetting.hasPrefix("DeepL") { return "DeepL" }
+        return "Google"
+    }
+
+    private var cloudServiceOrderSetting: String {
+        let stored = UserDefaults.standard.string(forKey: "cloudServiceOrder")
+        if let stored, cloudServiceOrderOptions.contains(stored) {
+            return stored
+        }
+        // Preserve the primary cloud service chosen in earlier app versions.
+        switch UserDefaults.standard.string(forKey: "cloudBackend") {
+        case "Bing": return "Bing → Google → DeepL"
+        case "DeepL": return "DeepL → Google → Bing"
+        default: return cloudServiceOrderOptions[0]
+        }
+    }
+
+    private var googleFallbackOrderSetting: String {
+        let value = UserDefaults.standard.string(forKey: "googleFallbackOrder") ?? googleFallbackOrderOptions[0]
+        return googleFallbackOrderOptions.contains(value) ? value : googleFallbackOrderOptions[0]
+    }
+
+    private var googleFallbackOrderValue: String {
+        googleFallbackOrderSetting
+            .components(separatedBy: " → ")
+            .map { $0 == "Web RPC" ? "google_rpc" : "google_\($0.lowercased())" }
+            .joined(separator: ",")
     }
 
     private var guiLanguageSetting: String {
@@ -568,10 +866,11 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         switch launchBackendOverride {
         case "cloud":
             return cloudBackendSetting.lowercased()
-        case "google", "bing", "gemma":
+        case "apple", "google", "bing", "deepl", "gemma":
             return launchBackendOverride!
         default:
-            return "gemma"
+            let configured = defaultBackendSetting
+            return configured == "cloud" ? cloudBackendSetting.lowercased() : configured
         }
     }
 
@@ -594,6 +893,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
             suspensionBehavior: .deliverImmediately
         )
         buildWindow()
+        installAppleTranslationBridge()
         if let restoredTarget {
             targetPopup.selectItem(withTitle: restoredTarget)
             updateTranslationHeader()
@@ -626,6 +926,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
     private func showLightUI() {
         usesLightUI = true
+        appleTranslationCoordinator?.lightHostIsActive = true
         window.orderOut(nil)
         NSApp.setActivationPolicy(.accessory)
 
@@ -660,9 +961,10 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
         let panel = LightTranslationPanel()
         panel.hidesOnDeactivate = false
-        let view = LightTranslationView(model: model) { [weak panel] size in
-            panel?.updateContentSize(size)
-        }
+        let view = LightTranslationView(
+            model: model,
+            appleTranslationCoordinator: appleTranslationCoordinator
+        )
         let hostingView = NSHostingView(rootView: view)
         panel.contentView = hostingView
         panel.setContentSize(hostingView.fittingSize)
@@ -681,6 +983,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
     private func showFullUI() {
         usesLightUI = false
+        appleTranslationCoordinator?.lightHostIsActive = false
         lightPanel?.orderOut(nil)
         NSApp.setActivationPolicy(.regular)
         buildMenu()
@@ -692,6 +995,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         if usesChineseUI {
             switch key {
             case "appTitle": return "翻译文本"
+            case "aboutApp": return "关于翻译文本"
             case "subtitle": return "使用本地 TranslateGemma 模型翻译所选文本。"
             case "loadingTitle": return "正在加载 TranslateGemma"
             case "loadingStatus": return "正在准备本地翻译模型..."
@@ -715,13 +1019,15 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
             case "backendStopped": return "后端已停止"
             case "detected": return "检测到"
             case "settings": return "设置"
-            case "settingsSubtitle": return "配置默认语言、本地模型路径、云端翻译提供商和界面语言。"
+            case "settingsSubtitle": return "配置默认语言、LLM 模型路径、云端服务及回退顺序和界面语言。"
             case "guiLanguage": return "界面语言"
-            case "cloudBackend": return "云端后端"
+            case "cloudServiceOrder": return "云端服务顺序"
+            case "googleFallbackOrder": return "Google 回退顺序"
             case "backendMode": return "模型"
-            case "localModel": return "本地"
+            case "appleModel": return "系统"
+            case "llmModel": return "LLM"
             case "cloudModel": return "云端"
-            case "loadingLocalModel": return "正在加载本地模型..."
+            case "loadingLocalModel": return "正在加载 LLM 模型..."
             case "switchingBackend": return "正在切换模型..."
             case "nativeLanguage": return "母语"
             case "primaryForeign": return "主要外语"
@@ -730,7 +1036,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
             case "cancel": return "取消"
             case "save": return "保存"
             case "settingsSaved": return "设置已保存"
-            case "settingsSavedMessage": return "语言默认值和云端后端已更新。模型路径和界面语言会在下次启动时生效。"
+            case "settingsSavedMessage": return "语言默认值、云端后端和回退顺序已更新。模型路径和界面语言会在下次启动时生效。"
             case "openTextFile": return "打开文本文件..."
             case "copyOriginalText": return "复制原文"
             case "expandCollapseOriginal": return "展开/收起原文"
@@ -745,6 +1051,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         }
         switch key {
         case "appTitle": return "Translate Text"
+        case "aboutApp": return "About Translate Text"
         case "subtitle": return "Translate selected text with the local TranslateGemma model."
         case "loadingTitle": return "Loading TranslateGemma"
         case "loadingStatus": return "Preparing local translation model..."
@@ -768,13 +1075,15 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         case "backendStopped": return "Backend stopped"
         case "detected": return "Detected"
         case "settings": return "Settings"
-        case "settingsSubtitle": return "Configure the default language pair, local model path, cloud translation provider, and interface language."
+        case "settingsSubtitle": return "Configure language defaults, the LLM model, cloud translation, fallback order, and interface language."
         case "guiLanguage": return "GUI Language"
-        case "cloudBackend": return "Cloud Backend"
+        case "cloudServiceOrder": return "Cloud Service Order"
+        case "googleFallbackOrder": return "Google Fallback Order"
         case "backendMode": return "Model"
-        case "localModel": return "Local"
+        case "appleModel": return "OS"
+        case "llmModel": return "LLM"
         case "cloudModel": return "Cloud"
-        case "loadingLocalModel": return "Loading local model..."
+        case "loadingLocalModel": return "Loading LLM model..."
         case "switchingBackend": return "Switching model..."
         case "nativeLanguage": return "Native Language"
         case "primaryForeign": return "Primary Foreign"
@@ -783,7 +1092,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         case "cancel": return "Cancel"
         case "save": return "Save"
         case "settingsSaved": return "Settings Saved"
-        case "settingsSavedMessage": return "Language defaults and cloud backend are updated. Model path and interface language changes apply the next time Translate Text launches."
+        case "settingsSavedMessage": return "Language defaults, cloud backend, and fallback order are updated. Model path and interface language changes apply the next time Translate Text launches."
         case "openTextFile": return "Open Text File..."
         case "copyOriginalText": return "Copy Original Text"
         case "expandCollapseOriginal": return "Expand/Collapse Original"
@@ -795,6 +1104,37 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         case "emptyOriginal": return "Original text is empty."
         default: return key
         }
+    }
+
+    @objc private func showAbout(_ sender: Any?) {
+        NSApp.orderFrontStandardAboutPanel(options: [
+            .credits: aboutCredits()
+        ])
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func aboutCredits() -> NSAttributedString {
+        let website = URL(string: "https://jingyuan-zheng.github.io/")!
+        let repository = URL(string: "https://github.com/Jingyuan-Zheng/Mac-Lite-Translator_TranslateGemma")!
+        let websiteTitle = usesChineseUI ? "个人网站" : "Personal Website"
+        let repositoryTitle = usesChineseUI ? "GitHub 仓库" : "GitHub Repository"
+        let licenseTitle = usesChineseUI ? "开源软件 · MIT 许可证" : "Open source · MIT License"
+        let authorTitle = usesChineseUI ? "作者：Jingyuan Zheng" : "Created by Jingyuan Zheng"
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .center
+
+        let credits = NSMutableAttributedString(
+            string: "\(authorTitle)\n\n\(websiteTitle)\n\(repositoryTitle)\n\n\(licenseTitle)",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+                .paragraphStyle: paragraphStyle,
+            ]
+        )
+        let text = credits.string as NSString
+        credits.addAttribute(.link, value: website, range: text.range(of: websiteTitle))
+        credits.addAttribute(.link, value: repository, range: text.range(of: repositoryTitle))
+        credits.addAttribute(.link, value: repository, range: text.range(of: licenseTitle))
+        return credits
     }
 
     private func localizedLanguageForDisplay(_ language: String) -> String {
@@ -926,21 +1266,19 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         targetPopup = popup(languages.map(\.name), action: #selector(selectionChanged(_:)))
         stylePopup = popup(styles, action: #selector(selectionChanged(_:)))
         backendModeControl = NSSegmentedControl(
-            labels: [tr("localModel"), tr("cloudModel")],
+            labels: [tr("appleModel"), tr("llmModel"), tr("cloudModel")],
             trackingMode: .selectOne,
             target: self,
             action: #selector(backendModeChanged(_:))
         )
         backendModeControl.controlSize = .large
-        backendModeControl.segmentStyle = .rounded
+        backendModeControl.segmentStyle = .capsule
         backendModeControl.segmentDistribution = .fillEqually
-        backendModeControl.selectedSegment = isUsingCloudBackend ? 1 : 0
+        backendModeControl.selectedSegment = selectedBackendSegment
 
-        backendSwitchProgress = NSProgressIndicator()
-        backendSwitchProgress.style = .spinning
-        backendSwitchProgress.controlSize = .small
-        backendSwitchProgress.isDisplayedWhenStopped = false
-        let backendSelectorRow = NSStackView(views: [backendModeControl, backendSwitchProgress])
+        // Backend loading state is shown in the footer. Keeping the selector
+        // alone here gives Model the same label-to-control gap as its peers.
+        let backendSelectorRow = NSStackView(views: [backendModeControl])
         backendSelectorRow.orientation = .horizontal
         backendSelectorRow.alignment = .centerY
         backendSelectorRow.spacing = 8
@@ -970,15 +1308,29 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         actionRow.alignment = .centerY
         actionRow.distribution = .fillEqually
 
+        let targetOption = inlineControl(tr("target"), control: targetPopup)
+        let styleOption = inlineControl(tr("style"), control: stylePopup)
+        let modelOption = inlineControl(tr("backendMode"), control: backendSelectorRow)
+        let leadingGap = NSView()
+        let trailingGap = NSView()
+        [targetOption, styleOption, modelOption].forEach {
+            $0.setContentHuggingPriority(.required, for: .horizontal)
+            $0.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
         let optionsRow = NSStackView(views: [
-            inlineControl(tr("target"), control: targetPopup),
-            inlineControl(tr("style"), control: stylePopup),
-            inlineControl(tr("backendMode"), control: backendSelectorRow),
+            targetOption,
+            leadingGap,
+            styleOption,
+            trailingGap,
+            modelOption,
         ])
         optionsRow.orientation = .horizontal
         optionsRow.alignment = .centerY
-        optionsRow.distribution = .fillEqually
-        optionsRow.spacing = 18
+        optionsRow.distribution = .fill
+        optionsRow.spacing = 0
+        // Pin Target and Model to the outer edges; equal flexible gaps place
+        // Style exactly between them.
+        leadingGap.widthAnchor.constraint(equalTo: trailingGap.widthAnchor).isActive = true
 
         let controlsStack = NSStackView(views: [optionsRow, actionRow])
         controlsStack.orientation = .vertical
@@ -1007,7 +1359,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         footerProgress.style = .spinning
         footerProgress.isDisplayedWhenStopped = false
         footerStatusLabel = label(tr("loadingTitle") + "...", size: 13)
-        let footerLeft = NSStackView(views: [footerProgress, footerStatusLabel])
+        let footerLeft = NSStackView(views: [footerStatusLabel, footerProgress])
         footerLeft.orientation = .horizontal
         footerLeft.spacing = 8
         footerLeft.alignment = .centerY
@@ -1025,9 +1377,15 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         footerView.translatesAutoresizingMaskIntoConstraints = false
         footerView.addSubview(footer)
 
+        // The original text box defines the single visible content boundary
+        // for the whole main window.  Other rows bind to this guide directly
+        // instead of estimating their position from a reduced width.
+        let contentGuide = NSLayoutGuide()
+        rootView.addLayoutGuide(contentGuide)
+
         mainContent = NSStackView(views: [headerRow, originalPanel, controlsView, translationPanel, footerView])
         mainContent.orientation = .vertical
-        mainContent.alignment = .width
+        mainContent.alignment = .centerX
         mainContent.spacing = 13
         mainContent.edgeInsets = NSEdgeInsets(top: 54, left: 28, bottom: 20, right: 28)
         mainContent.translatesAutoresizingMaskIntoConstraints = false
@@ -1040,11 +1398,18 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
             mainContent.leadingAnchor.constraint(equalTo: rootView.leadingAnchor),
             mainContent.trailingAnchor.constraint(equalTo: rootView.trailingAnchor),
             mainContent.bottomAnchor.constraint(equalTo: rootView.bottomAnchor),
-            headerRow.widthAnchor.constraint(equalTo: mainContent.widthAnchor, constant: -56),
             originalPanel.widthAnchor.constraint(equalTo: mainContent.widthAnchor, constant: -56),
-            controlsView.widthAnchor.constraint(equalTo: mainContent.widthAnchor, constant: -56),
             translationPanel.widthAnchor.constraint(equalTo: mainContent.widthAnchor, constant: -56),
-            footerView.widthAnchor.constraint(equalTo: mainContent.widthAnchor, constant: -56),
+            contentGuide.leadingAnchor.constraint(equalTo: originalTextBox.leadingAnchor),
+            contentGuide.trailingAnchor.constraint(equalTo: originalTextBox.trailingAnchor),
+            headerRow.leadingAnchor.constraint(equalTo: contentGuide.leadingAnchor),
+            headerRow.trailingAnchor.constraint(equalTo: contentGuide.trailingAnchor),
+            controlsView.leadingAnchor.constraint(equalTo: contentGuide.leadingAnchor),
+            controlsView.trailingAnchor.constraint(equalTo: contentGuide.trailingAnchor),
+            footerView.leadingAnchor.constraint(equalTo: contentGuide.leadingAnchor),
+            footerView.trailingAnchor.constraint(equalTo: contentGuide.trailingAnchor),
+            translationTextBox.leadingAnchor.constraint(equalTo: contentGuide.leadingAnchor),
+            translationTextBox.trailingAnchor.constraint(equalTo: contentGuide.trailingAnchor),
             controlsStack.topAnchor.constraint(equalTo: controlsView.topAnchor),
             controlsStack.leadingAnchor.constraint(equalTo: controlsView.leadingAnchor),
             controlsStack.trailingAnchor.constraint(equalTo: controlsView.trailingAnchor),
@@ -1064,8 +1429,6 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
             targetPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 160),
             stylePopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 160),
             backendModeControl.widthAnchor.constraint(greaterThanOrEqualToConstant: 150),
-            backendSwitchProgress.widthAnchor.constraint(equalToConstant: 16),
-            backendSwitchProgress.heightAnchor.constraint(equalToConstant: 16),
         ])
 
         setControlsEnabled(false)
@@ -1081,6 +1444,9 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         menuBar.addItem(appItem)
         let appMenu = NSMenu()
         appItem.submenu = appMenu
+        let aboutItem = appMenu.addItem(withTitle: tr("aboutApp"), action: #selector(showAbout(_:)), keyEquivalent: "")
+        aboutItem.target = self
+        appMenu.addItem(NSMenuItem.separator())
         let settingsItem = appMenu.addItem(withTitle: tr("settings") + "...", action: #selector(openSettings(_:)), keyEquivalent: ",")
         settingsItem.target = self
         appMenu.addItem(NSMenuItem.separator())
@@ -1138,21 +1504,30 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
     }
 
     private func startWorker() {
+        guard activeWorkerBackend != "apple" else {
+            isReady = true
+            showMainPage()
+            setControlsEnabled(true)
+            footerProgress.stopAnimation(nil)
+            footerStatusLabel.stringValue = tr("ready")
+            updateBackendDependentControls()
+            lightModel?.statusText = tr("ready")
+            lightModel?.backendName = backendDisplayName()
+            translateCurrentText()
+            return
+        }
         guard !workerPath.isEmpty else {
             showAlert(title: usesChineseUI ? "后端缺失" : "Worker Missing", message: "translate_text_worker.py was not found in the app bundle.")
             return
         }
         let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/opt/anaconda3/bin/python")
+        process.arguments = [workerPath]
         var environment = ProcessInfo.processInfo.environment
-        if let pythonPath = environment["TRANSLATE_TEXT_PYTHON"], !pythonPath.isEmpty {
-            process.executableURL = URL(fileURLWithPath: pythonPath)
-            process.arguments = [workerPath]
-        } else {
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = ["python3", workerPath]
-        }
         environment["TRANSLATE_TEXT_MODEL"] = modelPath
         environment["TRANSLATE_TEXT_BACKEND"] = activeWorkerBackend
+        environment["TRANSLATE_TEXT_GOOGLE_FALLBACK_ORDER"] = googleFallbackOrderValue
+        environment["TRANSLATE_TEXT_CLOUD_FALLBACK_ORDER"] = cloudServiceOrderSetting
         process.environment = environment
 
         let input = Pipe()
@@ -1187,6 +1562,71 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
             try process.run()
         } catch {
             showAlert(title: usesChineseUI ? "无法启动后端" : "Could Not Start Backend", message: error.localizedDescription)
+        }
+    }
+
+    private func installAppleTranslationBridge() {
+        guard #available(macOS 15.0, *) else { return }
+        let coordinator = AppleTranslationCoordinator()
+        coordinator.lightHostIsActive = usesLightUI
+        coordinator.onCompletion = { [weak self] _, result in
+            self?.finishAppleTranslation(result)
+        }
+        let hostingView = NSHostingView(rootView: AppleTranslationBridge(
+            coordinator: coordinator,
+            isLightHost: false
+        ))
+        hostingView.translatesAutoresizingMaskIntoConstraints = false
+        rootView.addSubview(hostingView)
+        NSLayoutConstraint.activate([
+            hostingView.leadingAnchor.constraint(equalTo: rootView.leadingAnchor),
+            hostingView.bottomAnchor.constraint(equalTo: rootView.bottomAnchor),
+            hostingView.widthAnchor.constraint(equalToConstant: 1),
+            hostingView.heightAnchor.constraint(equalToConstant: 1),
+        ])
+        appleTranslationCoordinator = coordinator
+        appleTranslationHostingView = hostingView
+    }
+
+    private func translateWithApple(text: String, target: String) {
+        guard #available(macOS 15.0, *), let coordinator = appleTranslationCoordinator else {
+            finishAppleTranslation(.failure(NSError(
+                domain: "TranslateText",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Apple translation requires macOS 15 or later."]
+            )))
+            return
+        }
+        guard let targetCode = languages.first(where: { $0.name == target })?.code else { return }
+        let sourceCode = detectedAppleSourceLanguageCode(for: text)
+        translationTextView.string = tr("translating") + "..."
+        footerProgress.startAnimation(nil)
+        footerStatusLabel.stringValue = tr("translating")
+        lightModel?.translatedText = ""
+        lightModel?.errorMessage = nil
+        lightModel?.statusText = tr("translating") + "..."
+        lightModel?.isLoading = true
+        coordinator.translate(text: text, sourceLanguageCode: sourceCode, targetLanguageCode: targetCode)
+    }
+
+    private func finishAppleTranslation(_ result: Result<String, Error>) {
+        guard activeWorkerBackend == "apple" || isUsingSystemFallback else { return }
+        footerProgress.stopAnimation(nil)
+        switch result {
+        case .success(let translatedText):
+            translationTextView.string = translatedText
+            footerStatusLabel.stringValue = tr("complete")
+            lightModel?.translatedText = translatedText
+            lightModel?.statusText = tr("complete")
+            lightModel?.isLoading = false
+        case .failure(let error):
+            footerStatusLabel.stringValue = tr("failed")
+            lightModel?.errorMessage = error.localizedDescription
+            lightModel?.statusText = tr("failed")
+            lightModel?.isLoading = false
+            if !usesLightUI {
+                showAlert(title: "Apple Translation", message: error.localizedDescription)
+            }
         }
     }
 
@@ -1242,7 +1682,6 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
             }
             isSwitchingBackend = false
             backendBeforeSwitch = nil
-            backendSwitchProgress.stopAnimation(nil)
             setControlsEnabled(true)
             footerProgress.stopAnimation(nil)
             footerStatusLabel.stringValue = tr("ready")
@@ -1280,11 +1719,21 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
                 lightModel?.isLoading = false
             }
         case "error":
+            let message = payload["message"] as? String ?? "Unknown error"
+            if isUsingCloudBackend, !isSwitchingBackend, !isUsingSystemFallback {
+                isUsingSystemFallback = true
+                footerStatusLabel.stringValue = usesChineseUI ? "云端不可用，正在改用系统翻译..." : "Cloud unavailable; trying system translation..."
+                lightModel?.backendName = usesChineseUI ? "系统保底" : "OS fallback"
+                translateWithApple(
+                    text: originalTextView.string.trimmingCharacters(in: .whitespacesAndNewlines),
+                    target: targetPopup.titleOfSelectedItem ?? nativeLanguage
+                )
+                return
+            }
             if isSwitchingBackend {
                 launchBackendOverride = backendBeforeSwitch
                 backendBeforeSwitch = nil
                 isSwitchingBackend = false
-                backendSwitchProgress.stopAnimation(nil)
                 setControlsEnabled(true)
                 updateBackendDependentControls()
             }
@@ -1292,7 +1741,6 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
             footerProgress.stopAnimation(nil)
             loadingStatusLabel.stringValue = usesChineseUI ? "模型加载失败" : "Failed to load model"
             footerStatusLabel.stringValue = tr("failed")
-            let message = payload["message"] as? String ?? "Unknown error"
             withAnimation {
                 lightModel?.errorMessage = message
                 lightModel?.isLoading = false
@@ -1321,8 +1769,10 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         guard let text = notification.userInfo?["text"] as? String else { return }
         let requestedBackend = normalizedBackendOverride(notification.userInfo?["backend"] as? String)
         let requestsLightUI = notification.userInfo?["ui"] as? String == "light"
-        launchBackendOverride = requestedBackend
-        replaceOriginalText(text)
+        let requestedMode = requestedBackend ?? defaultBackendSetting
+        let resolvedBackend = requestedMode == "cloud" ? cloudBackendSetting.lowercased() : requestedMode
+        let currentBackend = activeWorkerBackend
+        replaceOriginalText(text, automaticallyTranslate: false)
         if requestsLightUI {
             showLightUI()
         } else if usesLightUI {
@@ -1331,9 +1781,17 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         }
+
+        if resolvedBackend == currentBackend {
+            launchBackendOverride = requestedBackend
+            syncBackendModeControl()
+            translateCurrentText()
+        } else {
+            switchBackend(to: requestedMode)
+        }
     }
 
-    private func replaceOriginalText(_ text: String) {
+    private func replaceOriginalText(_ text: String, automaticallyTranslate: Bool = true) {
         let newText = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? readLaunchText() : text
         if originalTextView == nil {
             initialText = newText
@@ -1346,7 +1804,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         autoSelectTargetLanguage(for: newText)
         updateTranslationHeader()
         lightModel?.targetLanguage = targetPopup.titleOfSelectedItem ?? nativeLanguage
-        if isReady {
+        if isReady, automaticallyTranslate {
             translateCurrentText()
         }
     }
@@ -1374,6 +1832,11 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         lightModel?.sourceText = text
         lightModel?.targetLanguage = target
         lightModel?.backendName = backendDisplayName()
+        isUsingSystemFallback = false
+        if activeWorkerBackend == "apple" {
+            translateWithApple(text: text, target: target)
+            return
+        }
         sendCommand([
             "action": "translate",
             "text": text,
@@ -1394,15 +1857,15 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
     @objc private func backendModeChanged(_ sender: NSSegmentedControl) {
         guard !isSyncingBackendModeControl else { return }
-        guard !usesLightUI else {
-            syncBackendModeControl()
-            return
+        switch sender.selectedSegment {
+        case 0: switchBackend(to: "apple")
+        case 1: switchBackend(to: "gemma")
+        default: switchBackend(to: "cloud")
         }
-        switchBackend(to: sender.selectedSegment == 1 ? "cloud" : "gemma")
     }
 
     private func switchBackend(to requestedBackend: String) {
-        guard isReady, !isSwitchingBackend else {
+        guard isReady else {
             syncBackendModeControl()
             return
         }
@@ -1419,14 +1882,30 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         syncBackendModeControl()
         setControlsEnabled(false)
 
+        if resolvedBackend == "apple" {
+            isSwitchingBackend = false
+            backendBeforeSwitch = nil
+            setControlsEnabled(true)
+            footerProgress.stopAnimation(nil)
+            footerStatusLabel.stringValue = tr("ready")
+            updateBackendDependentControls()
+            translateCurrentText()
+            return
+        }
+
+        if worker == nil {
+            isReady = false
+            showLoadingPage()
+            startWorker()
+            return
+        }
+
         let needsLocalLoad = resolvedBackend == "gemma" && !localBackendReady
         if needsLocalLoad {
-            backendSwitchProgress.startAnimation(nil)
             footerProgress.startAnimation(nil)
             footerStatusLabel.stringValue = tr("loadingLocalModel")
             setStatus(tr("loadingLocalModel"))
         } else {
-            backendSwitchProgress.stopAnimation(nil)
             footerProgress.stopAnimation(nil)
             footerStatusLabel.stringValue = tr("switchingBackend")
             setStatus(tr("switchingBackend"))
@@ -1532,116 +2011,66 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
             return
         }
 
+        let draft = SettingsDraft(
+            defaultBackend: defaultBackendSetting,
+            guiLanguage: guiLanguageSetting,
+            nativeLanguage: nativeLanguage,
+            primaryForeignLanguage: primaryForeignLanguage,
+            modelPath: modelPath,
+            cloudServiceOrder: cloudServiceOrderSetting.components(separatedBy: " → "),
+            googleFallbackOrder: googleFallbackOrderSetting.components(separatedBy: " → "),
+            guiLanguageOptions: guiLanguageOptions,
+            backendOptions: backendOptions,
+            languageOptions: languages.map(\.name)
+        )
+        draft.onBrowseModel = { [weak self, weak draft] in
+            guard let self, let draft else { return }
+            let browser = NSOpenPanel()
+            browser.title = self.usesChineseUI ? "选择模型文件夹" : "Select Model Folder"
+            browser.canChooseDirectories = true
+            browser.canChooseFiles = false
+            browser.allowsMultipleSelection = false
+            if browser.runModal() == .OK, let url = browser.url {
+                draft.modelPath = url.path
+            }
+        }
+        draft.onSave = { [weak self] draft in
+            self?.saveSettings(draft)
+        }
+        draft.onCancel = { [weak self] in
+            self?.closeSettings()
+        }
+
+        let hostingView = NSHostingView(rootView: TranslateTextSettingsView(draft: draft))
+        hostingView.sizingOptions = [.intrinsicContentSize, .minSize]
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 660, height: 415),
-            styleMask: [.titled, .closable],
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 720),
+            styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
         panel.title = tr("settings")
         panel.isFloatingPanel = true
+        panel.contentView = hostingView
+        panel.minSize = NSSize(width: 680, height: 650)
         panel.center()
-
-        let content = NSVisualEffectView()
-        content.material = .hudWindow
-        content.blendingMode = .behindWindow
-        content.state = .active
-        panel.contentView = content
-
-        let title = label(tr("settings"), size: 24, weight: .bold)
-        title.textColor = .labelColor
-        let subtitle = label(tr("settingsSubtitle"), size: 13)
-
-        settingsGuiPopup = popup(guiLanguageOptions, action: #selector(noop(_:)))
-        settingsGuiPopup?.selectItem(withTitle: guiLanguageSetting)
-        settingsCloudBackendPopup = popup(cloudBackendOptions, action: #selector(noop(_:)))
-        settingsCloudBackendPopup?.selectItem(withTitle: cloudBackendSetting)
-        settingsNativePopup = popup(languages.map(\.name), action: #selector(noop(_:)))
-        settingsNativePopup?.selectItem(withTitle: nativeLanguage)
-        settingsForeignPopup = popup(languages.map(\.name), action: #selector(noop(_:)))
-        settingsForeignPopup?.selectItem(withTitle: primaryForeignLanguage)
-        settingsModelField = NSTextField(string: modelPath)
-        settingsModelField?.bezelStyle = .roundedBezel
-        settingsModelField?.controlSize = .large
-
-        let modelRow = NSStackView(views: [
-            settingsModelField!,
-            button(tr("browse"), symbol: "folder", action: #selector(browseModelPath(_:)))
-        ])
-        modelRow.orientation = .horizontal
-        modelRow.spacing = 8
-
-        let form = NSStackView(views: [
-            settingsRow(tr("guiLanguage"), control: settingsGuiPopup!),
-            settingsRow(tr("cloudBackend"), control: settingsCloudBackendPopup!),
-            settingsRow(tr("nativeLanguage"), control: settingsNativePopup!),
-            settingsRow(tr("primaryForeign"), control: settingsForeignPopup!),
-            settingsRow(tr("modelPath"), control: modelRow),
-        ])
-        form.orientation = .vertical
-        form.alignment = .width
-        form.spacing = 14
-
-        let buttons = NSStackView(views: [
-            NSView(),
-            button(tr("cancel"), symbol: "xmark", action: #selector(closeSettings(_:))),
-            button(tr("save"), symbol: "checkmark", action: #selector(saveSettings(_:)), prominent: true)
-        ])
-        buttons.orientation = .horizontal
-        buttons.spacing = 10
-        buttons.alignment = .centerY
-
-        let header = NSStackView(views: [leftAligned(title), leftAligned(subtitle)])
-        header.orientation = .vertical
-        header.alignment = .leading
-        header.spacing = 4
-
-        form.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-
-        let stack = NSStackView(views: [header, form, buttons])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 24
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(stack)
-
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 44),
-            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 44),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -44),
-            stack.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -34),
-            settingsGuiPopup!.widthAnchor.constraint(equalToConstant: 250),
-            settingsCloudBackendPopup!.widthAnchor.constraint(equalToConstant: 250),
-            settingsNativePopup!.widthAnchor.constraint(equalToConstant: 250),
-            settingsForeignPopup!.widthAnchor.constraint(equalToConstant: 250),
-            settingsModelField!.widthAnchor.constraint(equalToConstant: 300),
-            form.widthAnchor.constraint(equalToConstant: 560),
-            buttons.widthAnchor.constraint(equalTo: form.widthAnchor),
-        ])
 
         settingsPanel = panel
         panel.makeKeyAndOrderFront(nil)
     }
 
-    @objc private func browseModelPath(_ sender: Any?) {
-        let panel = NSOpenPanel()
-        panel.title = usesChineseUI ? "选择模型文件夹" : "Select Model Folder"
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let url = panel.url {
-            settingsModelField?.stringValue = url.path
-        }
-    }
-
-    @objc private func saveSettings(_ sender: Any?) {
-        UserDefaults.standard.set(settingsNativePopup?.titleOfSelectedItem ?? defaultNativeLanguage, forKey: "nativeLanguage")
-        UserDefaults.standard.set(settingsForeignPopup?.titleOfSelectedItem ?? defaultPrimaryForeignLanguage, forKey: "primaryForeignLanguage")
-        UserDefaults.standard.set(settingsGuiPopup?.titleOfSelectedItem ?? "Auto", forKey: "guiLanguage")
-        UserDefaults.standard.set(settingsCloudBackendPopup?.titleOfSelectedItem ?? defaultCloudBackend, forKey: "cloudBackend")
-        UserDefaults.standard.set(settingsModelField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) ?? defaultModelPath, forKey: "modelPath")
-        settingsPanel?.close()
-        settingsPanel = nil
+    private func saveSettings(_ draft: SettingsDraft) {
+        UserDefaults.standard.set(draft.defaultBackend, forKey: "defaultBackend")
+        UserDefaults.standard.set(draft.nativeLanguage, forKey: "nativeLanguage")
+        UserDefaults.standard.set(draft.primaryForeignLanguage, forKey: "primaryForeignLanguage")
+        UserDefaults.standard.set(draft.guiLanguage, forKey: "guiLanguage")
+        let cloudOrder = draft.cloudServiceOrder.joined(separator: " → ")
+        UserDefaults.standard.set(cloudOrder, forKey: "cloudServiceOrder")
+        let cloudBackend = cloudOrder.hasPrefix("Bing") ? "Bing" : (cloudOrder.hasPrefix("DeepL") ? "DeepL" : "Google")
+        UserDefaults.standard.set(cloudBackend, forKey: "cloudBackend")
+        UserDefaults.standard.set(draft.googleFallbackOrder.joined(separator: " → "), forKey: "googleFallbackOrder")
+        UserDefaults.standard.set(draft.modelPath.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "modelPath")
+        closeSettings()
         lastForeignLanguage = primaryForeignLanguage
         autoSelectTargetLanguage(for: originalTextView.string)
         updateTranslationHeader()
@@ -1649,12 +2078,10 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         showAlert(title: tr("settingsSaved"), message: tr("settingsSavedMessage"))
     }
 
-    @objc private func closeSettings(_ sender: Any?) {
+    private func closeSettings() {
         settingsPanel?.close()
         settingsPanel = nil
     }
-
-    @objc private func noop(_ sender: Any?) {}
 
     @objc private func selectStyleFromMenu(_ sender: NSMenuItem) {
         if let style = sender.representedObject as? String {
@@ -1740,6 +2167,14 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         return "English"
     }
 
+    private func detectedAppleSourceLanguageCode(for text: String) -> String? {
+        guard let language = NLLanguageRecognizer.dominantLanguage(for: text) else { return nil }
+        let code = language.rawValue
+        if code.hasPrefix("zh-Hans") || code == "zh" { return "zh-Hans" }
+        if code.hasPrefix("zh-Hant") { return "zh-Hant" }
+        return languages.contains(where: { $0.code == code }) ? code : nil
+    }
+
     private func copyToClipboard(_ text: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
@@ -1777,40 +2212,58 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
     private func updateBackendDependentControls(controlsEnabled: Bool? = nil) {
         let enabled = controlsEnabled ?? isReady
-        stylePopup?.isEnabled = enabled && !isUsingCloudBackend
-        backendModeControl?.isEnabled = enabled && !isSwitchingBackend
+        stylePopup?.isEnabled = enabled && activeWorkerBackend == "gemma"
+        // Keep the native selector live while a backend initializes: selecting
+        // another mode cancels the stale worker request and starts the newest one.
+        backendModeControl?.isEnabled = isReady
         syncBackendModeControl()
         subtitleLabel?.stringValue = subtitleText()
         statusLabel?.stringValue = backendDisplayName()
     }
 
     private var isUsingCloudBackend: Bool {
-        activeWorkerBackend == "google" || activeWorkerBackend == "bing"
+        activeWorkerBackend == "google" || activeWorkerBackend == "bing" || activeWorkerBackend == "deepl"
+    }
+
+    private var selectedBackendSegment: Int {
+        switch activeWorkerBackend {
+        case "apple": return 0
+        case "gemma": return 1
+        default: return 2
+        }
     }
 
     private func syncBackendModeControl() {
         isSyncingBackendModeControl = true
-        backendModeControl?.selectedSegment = isUsingCloudBackend ? 1 : 0
+        backendModeControl?.selectedSegment = selectedBackendSegment
         isSyncingBackendModeControl = false
     }
 
     private func subtitleText() -> String {
         if usesChineseUI {
             switch activeWorkerBackend {
+            case "apple":
+                return "使用 macOS 系统翻译翻译所选文本。"
             case "google":
                 return "使用 Google Translate 云端翻译所选文本。"
             case "bing":
                 return "使用 Bing Translator 云端翻译所选文本。"
+            case "deepl":
+                return "使用 DeepL 社区网页后端翻译所选文本。"
             default:
                 return "使用本地 TranslateGemma 模型翻译所选文本。"
             }
         }
 
         switch activeWorkerBackend {
+        case "apple":
+            return "Translate selected text with macOS system translation."
         case "google":
             return "Translate selected text with Google Translate."
         case "bing":
             return "Translate selected text with Bing Translator."
+        case "deepl":
+            return "Translate selected text with the DeepL community web backend."
         default:
             return "Translate selected text with the local TranslateGemma model."
         }
@@ -1818,10 +2271,14 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
     private func backendDisplayName() -> String {
         switch activeWorkerBackend {
+        case "apple":
+            return usesChineseUI ? "系统" : "OS"
         case "google":
             return "Google Translate"
         case "bing":
             return "Bing Translator"
+        case "deepl":
+            return "DeepL (Community)"
         default:
             return modelDisplayName()
         }
@@ -1869,10 +2326,13 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         return row
     }
 
-    private func inlineControl(_ title: String, control: NSView) -> NSStackView {
+    private func inlineControl(
+        _ title: String,
+        control: NSView
+    ) -> NSStackView {
         let field = label(title, size: 13, weight: .medium)
-        field.alignment = .right
-        field.widthAnchor.constraint(equalToConstant: 54).isActive = true
+        field.alignment = .left
+        field.setContentHuggingPriority(.required, for: .horizontal)
         control.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let row = NSStackView(views: [field, control])
         row.orientation = .horizontal
@@ -1895,6 +2355,7 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         row.addSubview(control)
         NSLayoutConstraint.activate([
             row.heightAnchor.constraint(greaterThanOrEqualToConstant: 32),
+            row.heightAnchor.constraint(greaterThanOrEqualTo: control.heightAnchor),
             field.leadingAnchor.constraint(equalTo: row.leadingAnchor),
             field.centerYAnchor.constraint(equalTo: row.centerYAnchor),
             field.widthAnchor.constraint(equalToConstant: 130),
@@ -1938,6 +2399,9 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         let scroll = NSScrollView()
         scroll.borderType = .noBorder
         scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .overlay
+        scroll.hasHorizontalScroller = false
         scroll.drawsBackground = false
         let textView = NSTextView()
         textView.isEditable = editable
@@ -1952,14 +2416,12 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         return scroll
     }
 
-    private func textBox(_ scroll: NSScrollView) -> NSVisualEffectView {
-        let box = NSVisualEffectView()
-        box.material = .contentBackground
-        box.blendingMode = .withinWindow
-        box.state = .active
+    private func textBox(_ scroll: NSScrollView) -> NSView {
+        let box = NSView()
         box.wantsLayer = true
         box.layer?.cornerRadius = 8
         box.layer?.masksToBounds = true
+        box.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.5).cgColor
         box.addSubview(scroll)
         pin(scroll, to: box)
         return box
@@ -1978,7 +2440,12 @@ final class TranslateTextApp: NSObject, NSApplicationDelegate, NSWindowDelegate,
         stack.orientation = .vertical
         stack.alignment = .width
         stack.spacing = 10
-        stack.edgeInsets = NSEdgeInsets(top: 16, left: 18, bottom: 16, right: 18)
+        stack.edgeInsets = NSEdgeInsets(
+            top: 16,
+            left: textPanelHorizontalInset,
+            bottom: 16,
+            right: textPanelHorizontalInset
+        )
         stack.translatesAutoresizingMaskIntoConstraints = false
         return stack
     }

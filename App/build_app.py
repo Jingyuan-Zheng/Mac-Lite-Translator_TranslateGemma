@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-APP_ROOT = ROOT / "App"
+APP_ROOT = Path(__file__).resolve().parent
 SOURCE = APP_ROOT / "Sources" / "TranslateText.swift"
 WORKER = APP_ROOT / "Workers" / "translate_text_worker.py"
 TRANSLATEKIT_LICENSE = APP_ROOT / "TRANSLATEKIT_LICENSE.txt"
@@ -30,10 +30,16 @@ def main() -> None:
         [
             "swiftc",
             "-O",
+            "-target",
+            "arm64-apple-macos15.0",
             "-module-cache-path",
             str(BUILD_DIR / "module-cache"),
             "-framework",
             "AppKit",
+            "-framework",
+            "Translation",
+            "-framework",
+            "NaturalLanguage",
             str(SOURCE),
             "-o",
             str(binary),
@@ -62,9 +68,9 @@ def main() -> None:
         "CFBundleName": "Translate Text",
         "CFBundleDisplayName": "Translate Text",
         "CFBundlePackageType": "APPL",
-        "CFBundleShortVersionString": "2.1",
-        "CFBundleVersion": "13",
-        "LSMinimumSystemVersion": "14.0",
+        "CFBundleShortVersionString": "2.2",
+        "CFBundleVersion": "25",
+        "LSMinimumSystemVersion": "15.0",
         "LSUIElement": True,
         "NSHighResolutionCapable": True,
         "NSPrincipalClass": "NSApplication",
@@ -76,6 +82,20 @@ def main() -> None:
         plistlib.dump(info, handle, sort_keys=False)
 
     os.chmod(macos_dir / EXECUTABLE_NAME, 0o755)
+    # Sign the completed bundle, rather than only the Swift executable.  Recent
+    # macOS releases reject a launcher-signed executable inside an unsigned app
+    # bundle before the process is spawned.
+    subprocess.run(
+        [
+            "codesign",
+            "--force",
+            "--sign",
+            "-",
+            "--timestamp=none",
+            str(APP_BUNDLE),
+        ],
+        check=True,
+    )
 
 
 if __name__ == "__main__":

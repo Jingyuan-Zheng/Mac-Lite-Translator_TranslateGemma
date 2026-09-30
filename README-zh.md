@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-这是一个支持本地 **TranslateGemma** MLX 模型和可选 Google/Bing 云端翻译的原生 macOS App。它适合配合 macOS 快捷指令使用，并在一个 App 进程内管理后端实例。
+这是一个原生 macOS 翻译器，提供三种可切换后端：**OS**（Apple 系统翻译）、**LLM**（本地 TranslateGemma MLX 模型）和 **Cloud**（Google、Bing、DeepL 云端回退）。它适合配合 macOS 快捷指令使用，并在一个 App 进程内管理后端实例。
 
 ## 主要特性
 
@@ -11,19 +11,22 @@
 ![Full UI](Screenshots/AppKit_GUI.png)
 
 - 原生 AppKit 界面，支持浅色/深色外观。
-- 使用 `mlx-lm` 在本地翻译，也可使用无需 API Key 的 Google 或 Bing 云端翻译。
-- Full UI 可在本地/云端之间切换；本地模型加载后会驻留到 App 退出。
+- Full UI 可在 OS 系统翻译、本地 LLM 与云端翻译之间切换。
+- OS 模式使用 Apple Translation framework 与已下载的系统语言包；云端模式全部失败时，会在可用条件下回退到系统翻译。
+- 云端支持 Google、Bing、DeepL，无需 API Key，并可在设置中调整服务回退顺序。
+- 运行时切换 OS/LLM/Cloud；本地 LLM 加载后会驻留到 App 退出。
 - `--light` 可打开不显示 Dock 图标的轻量动画浮窗，并可切换到 Full UI。
 - 适配 macOS 快捷指令，可通过服务菜单或键盘快捷键发送选中文本。
 - 单实例运行：重复调用快捷指令会复用已经打开的窗口和后端，不会再次加载一份模型。
 - 自动检测原文语言，并自动切换目标语言。
 - 支持 Default、Academic、Web Chat、Casual、Dictionary 等翻译风格。
 - GUI 支持英文和简体中文，Auto 模式会跟随系统语言。
+- 设置可选择默认启动方式；原生“关于”面板提供随界面语言变化的 Credits 与项目链接。
 
 ## 系统要求
 
 - Apple Silicon Mac。
-- macOS 14 或更高版本。
+- 使用 OS 系统翻译需要 macOS 15 或更高版本；维护中的 App 构建仍面向 Apple Silicon。
 - Python 3.10+，并安装 `mlx-lm`。
 - 本地 TranslateGemma MLX 模型文件夹，例如 `translategemma-12b-it-4bit`。
 - 12B 4-bit 模型建议使用 16GB 或更高统一内存。
@@ -61,7 +64,7 @@ cp -R "outputs/Translate Text.app" /Applications/
 1. 打开 `Translate Text.app`。
 2. 从菜单栏打开 `Settings...` / `设置`。
 3. 选择你的本地 TranslateGemma 模型文件夹。
-4. 可选：设置云端提供商、母语、主要外语和 GUI 语言。
+4. 可选：设置默认启动方式（OS、LLM、Cloud 或指定云端服务）、云端回退顺序、母语、主要外语和 GUI 语言。
 
 本仓库不会写入任何个人默认模型路径。首次使用时必须在设置里选择模型文件夹。
 
@@ -96,14 +99,26 @@ export TRANSLATE_TEXT_PYTHON="/path/to/your/python"
 # 使用设置中的云端提供商启动
 'outputs/Translate Text.app/Contents/MacOS/Translate Text' --cloud "Hello world"
 
+# 强制使用 macOS 系统翻译或本地 LLM
+'outputs/Translate Text.app/Contents/MacOS/Translate Text' --os "Hello world"
+'outputs/Translate Text.app/Contents/MacOS/Translate Text' --llm "Hello world"
+
 # 使用轻量浮窗启动
 'outputs/Translate Text.app/Contents/MacOS/Translate Text' --light "Hello world"
 
 # 指定后端
 'outputs/Translate Text.app/Contents/MacOS/Translate Text' --backend google "Hello world"
 'outputs/Translate Text.app/Contents/MacOS/Translate Text' --backend bing "Hello world"
-'outputs/Translate Text.app/Contents/MacOS/Translate Text' --backend gemma "Hello world"
+'outputs/Translate Text.app/Contents/MacOS/Translate Text' --backend llm "Hello world"
 ```
+
+Finder 或快捷指令通过 `open` 启动时同样支持这些参数：
+
+```bash
+/usr/bin/open -n '/Applications/Translate Text.app' --args --light --llm "$1"
+```
+
+不提供后端参数时，App 会使用设置中的默认启动方式；已有实例运行时，新请求会先切换真实后端，再翻译新文本。
 
 ## 支持语言
 
@@ -154,6 +169,10 @@ Screenshots/
 **为什么需要手动选择模型路径？**
 
 模型文件夹很大，而且路径和每台机器有关。开源版不会内置任何个人默认路径。你选择后，路径会保存在本机的 macOS UserDefaults 中。
+
+**OS 模式是否完全离线？**
+
+下载所需的 Apple 翻译语言包后，译文通过系统框架在设备上生成。某个语言组合首次使用时，系统可能要求联网下载并请求授权。可在“系统设置 → 通用 → 语言与地区 → 翻译语言”管理已下载的语言包。
 
 **需要多少内存？**
 
